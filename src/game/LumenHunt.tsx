@@ -32,6 +32,7 @@ export default function LumenHunt() {
 
   // multiplayer ui state
   const [role, setRole] = useState<Role>("h");
+  const [companion, setCompanion] = useState(false);
   const [codeIn, setCodeIn] = useState("");
   const [room, setRoom] = useState("");
   const [isHost, setIsHost] = useState(false);
@@ -84,20 +85,20 @@ export default function LumenHunt() {
     setRoom(""); setIsHost(false); setMpMsg(msg); setScreen("menu"); setTab("mp");
   };
 
-  const beginMatch = (seed: number, myRole: Role) => {
+  const beginMatch = (seed: number, myRole: Role, co = false) => {
     startedRef.current = true;
     setEnd(null); setPaused(false);
     const ch = chRef.current!;
     gameRef.current!.startMp(seed, myRole, {
       send: (ev, payload) => { void ch.send({ type: "broadcast", event: ev, payload }); },
-    });
+    }, co);
     setScreen("play");
   };
 
   const hostStart = () => {
     const seed = (Math.random() * 1e9) | 0;
-    void chRef.current?.send({ type: "broadcast", event: "start", payload: { seed, hr: role } });
-    beginMatch(seed, role);
+    void chRef.current?.send({ type: "broadcast", event: "start", payload: { seed, hr: role, co: role === "s" && companion } });
+    beginMatch(seed, role, role === "s" && companion);
   };
 
   const joinRoom = (code: string, host: boolean) => {
@@ -125,13 +126,13 @@ export default function LumenHunt() {
     });
     ch.on("broadcast", { event: "start" }, ({ payload }) => {
       if (host) return;
-      beginMatch(payload.seed, payload.hr === "h" ? "s" : "h");
+      beginMatch(payload.seed, payload.hr === "h" ? "s" : "h", !!payload.co);
     });
     for (const ev of ["st", "scan", "spot", "decoy"]) {
       ch.on("broadcast", { event: ev }, ({ payload }) => gameRef.current?.netIn(ev, payload));
     }
     ch.on("broadcast", { event: "end" }, ({ payload }) => gameRef.current?.remoteEnd(payload.w, payload.text));
-    ch.on("broadcast", { event: "rematch" }, ({ payload }) => { if (!host) beginMatch(payload.seed, payload.hr === "h" ? "s" : "h"); });
+    ch.on("broadcast", { event: "rematch" }, ({ payload }) => { if (!host) beginMatch(payload.seed, payload.hr === "h" ? "s" : "h", !!payload.co); });
 
     ch.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
@@ -152,8 +153,8 @@ export default function LumenHunt() {
 
   const rematch = () => {
     const seed = (Math.random() * 1e9) | 0;
-    void chRef.current?.send({ type: "broadcast", event: "rematch", payload: { seed, hr: role } });
-    beginMatch(seed, role);
+    void chRef.current?.send({ type: "broadcast", event: "rematch", payload: { seed, hr: role, co: role === "s" && companion } });
+    beginMatch(seed, role, role === "s" && companion);
   };
 
   // ---------- touch controls ----------
@@ -284,7 +285,7 @@ export default function LumenHunt() {
                 <>
                   {isHost ? (
                     <>
-                      <RoleToggle role={role} setRole={setRole} />
+                      <RoleToggle role={role} setRole={setRole} companion={companion} setCompanion={setCompanion} />
                       <button className="rounded-full bg-neon-blue px-8 py-3 text-lg font-extrabold" onClick={rematch}>Rematch ▶</button>
                     </>
                   ) : (
@@ -334,7 +335,7 @@ export default function LumenHunt() {
                 <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-3xl border border-ink/15 bg-ink/5 p-5 backdrop-blur-xl">
                   {!room ? (
                     <>
-                      <RoleToggle role={role} setRole={setRole} />
+                      <RoleToggle role={role} setRole={setRole} companion={companion} setCompanion={setCompanion} />
                       <button className="rounded-2xl border border-neon-blue px-5 py-2 font-extrabold" onClick={createRoom}>Create room</button>
                       <div className="flex gap-2">
                         <input
@@ -367,8 +368,9 @@ export default function LumenHunt() {
   );
 }
 
-function RoleToggle({ role, setRole }: { role: Role; setRole: (r: Role) => void }) {
+function RoleToggle({ role, setRole, companion, setCompanion }: { role: Role; setRole: (r: Role) => void; companion: boolean; setCompanion: (v: boolean) => void }) {
   return (
+    <div className="flex flex-col items-center gap-2">
     <div className="flex items-center gap-2">
       <span className="text-ink-dim">I am:</span>
       {(["h", "s"] as const).map((r) => (
@@ -376,6 +378,20 @@ function RoleToggle({ role, setRole }: { role: Role; setRole: (r: Role) => void 
           {r === "h" ? "🔵 Hider" : "🔴 Seeker"}
         </button>
       ))}
+    </div>
+    {role === "s" && (
+      <button
+        role="switch"
+        aria-checked={companion}
+        onClick={() => setCompanion(!companion)}
+        className="flex items-center gap-3 rounded-2xl border border-ink/20 px-4 py-2 text-sm font-bold"
+      >
+        <span>🤖 AI partner hunter</span>
+        <span className={`relative h-6 w-11 rounded-full transition-colors ${companion ? "bg-neon-red" : "bg-ink/20"}`}>
+          <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-ink transition-all ${companion ? "left-[22px]" : "left-0.5"}`} />
+        </span>
+      </button>
+    )}
     </div>
   );
 }
