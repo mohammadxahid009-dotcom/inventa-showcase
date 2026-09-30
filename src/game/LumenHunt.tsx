@@ -68,8 +68,19 @@ export default function LumenHunt() {
     };
   }, []);
 
+  // ---------- fullscreen ----------
+  const goFullscreen = () => {
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    if (document.fullscreenElement) return;
+    try {
+      if (el.requestFullscreen) void el.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+      else el.webkitRequestFullscreen?.();
+    } catch { /* not supported (e.g. iPhone Safari) */ }
+  };
+
   // ---------- solo ----------
   const playSolo = (lvl = 1) => {
+    goFullscreen();
     const d = DIFFS[diff] ?? DIFFS[0];
     if (!d) return;
     setLevel(lvl); setEnd(null); setPaused(false);
