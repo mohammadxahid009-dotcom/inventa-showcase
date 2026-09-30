@@ -68,8 +68,19 @@ export default function LumenHunt() {
     };
   }, []);
 
+  // ---------- fullscreen ----------
+  const goFullscreen = () => {
+    const el = document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => void };
+    if (document.fullscreenElement) return;
+    try {
+      if (el.requestFullscreen) void el.requestFullscreen({ navigationUI: "hide" }).catch(() => {});
+      else el.webkitRequestFullscreen?.();
+    } catch { /* not supported (e.g. iPhone Safari) */ }
+  };
+
   // ---------- solo ----------
   const playSolo = (lvl = 1) => {
+    goFullscreen();
     const d = DIFFS[diff] ?? DIFFS[0];
     if (!d) return;
     setLevel(lvl); setEnd(null); setPaused(false);
@@ -146,6 +157,7 @@ export default function LumenHunt() {
   };
 
   const createRoom = () => {
+    goFullscreen();
     let c = "";
     for (let i = 0; i < 5; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
     joinRoom(c, true);
@@ -190,6 +202,8 @@ export default function LumenHunt() {
   return (
     <div className="fixed inset-0 select-none overflow-hidden bg-void text-ink" style={{ touchAction: "none" }}>
       <canvas ref={cvRef} className="absolute inset-0 h-full w-full" />
+      <div className="pointer-events-none absolute" style={{ top: "env(safe-area-inset-top)", right: "env(safe-area-inset-right)", bottom: "env(safe-area-inset-bottom)", left: "env(safe-area-inset-left)" }}>
+      <div className="pointer-events-auto contents">
 
       {/* HUD */}
       <div className={`pointer-events-none absolute inset-x-0 top-2 flex items-start justify-between px-3 text-sm font-bold ${playing ? "" : "invisible"}`}>
@@ -269,6 +283,9 @@ export default function LumenHunt() {
         </>
       )}
 
+      </div>
+      </div>
+
       {/* menus */}
       {screen !== "play" && (
         <div
@@ -347,7 +364,7 @@ export default function LumenHunt() {
                         />
                         <button
                           className="rounded-2xl border border-neon-blue px-4 py-2 font-extrabold"
-                          onClick={() => { const c = codeIn.trim(); if (c.length < 4) { setMpMsg("Enter the room code"); return; } (document.activeElement as HTMLElement)?.blur(); joinRoom(c, false); }}
+                          onClick={() => { const c = codeIn.trim(); if (c.length < 4) { setMpMsg("Enter the room code"); return; } (document.activeElement as HTMLElement)?.blur(); goFullscreen(); joinRoom(c, false); }}
                         >Join</button>
                       </div>
                     </>
