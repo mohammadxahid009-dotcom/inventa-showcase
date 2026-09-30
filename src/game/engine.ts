@@ -378,7 +378,7 @@ export class Game {
     if (k['ArrowDown'] || k['s']) iy += 1;
     const il = Math.hypot(ix, iy);
     if (il > 1) { ix /= il; iy /= il; }
-    let sp = 230 * (me.spd > 0 ? 1.5 : 1);
+    let sp = 285 * (me.spd > 0 ? 1.5 : 1);
     if (this.dashT > 0) sp *= 3;
     me.vx = ix * sp; me.vy = iy * sp;
     me.moving = il > 0.15;
@@ -507,7 +507,7 @@ export class Game {
       }
       if (s.frozen > 0) { s.trail = this.decayTrail(s.trail, dt); continue; }
       const ox = s.x, oy = s.y;
-      let speed = (chasing ? 128 : 90) * this.diff * boost;
+      let speed = (chasing ? 145 : 102) * this.diff * boost;
       if (chasing && d < 90) speed *= 1.25; // lunge
       let move = speed * dt;
       while (move > 0 && s.path.length) {
@@ -574,7 +574,7 @@ export class Game {
   loop(now: number) {
     this.raf = requestAnimationFrame(this.loop);
     if (window.innerWidth !== this.W || window.innerHeight !== this.H) this.resize();
-    const dt = Math.min(0.05, Math.max(0, (now - this.last) / 1000));
+    const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
     this.last = now;
     if (this.running && !this.paused) this.update(dt);
     if (this.g.length && this.me) this.draw(now);
@@ -777,11 +777,13 @@ export class Game {
     // danger vignette
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     let danger = 0;
-    for (const s of this.seekers) danger = Math.max(danger, 1 - Math.hypot(s.x - me.x, s.y - me.y) / 260);
+    for (const s of this.seekers) danger = Math.max(danger, 1 - Math.hypot(s.x - me.x, s.y - me.y) / 300);
+    if (this.mp && this.role === "h" && this.foe) danger = Math.max(danger, 1 - Math.hypot(this.foe.x - me.x, this.foe.y - me.y) / 300);
     if (danger > 0 || this.alarmA > 0) {
-      const v = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.25, W / 2, H / 2, Math.max(W, H) * 0.7);
-      const a = Math.min(0.6, danger * 0.5 + (this.alarmA > 0 ? 0.25 : 0));
-      v.addColorStop(0, "rgba(0,0,0,0)"); v.addColorStop(1, `rgba(${this.alarmA > 0 ? "255,40,60" : "160,0,30"},${a})`);
+      const flick = 0.75 + 0.25 * Math.sin(now / (danger > 0.6 ? 70 : 130)) * (0.6 + 0.4 * Math.sin(now / 37));
+      const a = Math.min(0.42, (danger * danger * 0.45 + (this.alarmA > 0 ? 0.15 : 0)) * flick);
+      const v = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.42, W / 2, H / 2, Math.hypot(W, H) * 0.55);
+      v.addColorStop(0, "rgba(255,20,50,0)"); v.addColorStop(0.6, `rgba(220,10,40,${a * 0.35})`); v.addColorStop(1, `rgba(200,0,30,${a})`);
       c.fillStyle = v; c.fillRect(0, 0, W, H);
     }
     this.drawMini();
