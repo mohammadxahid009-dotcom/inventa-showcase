@@ -378,7 +378,7 @@ export class Game {
     if (k['ArrowDown'] || k['s']) iy += 1;
     const il = Math.hypot(ix, iy);
     if (il > 1) { ix /= il; iy /= il; }
-    let sp = 285 * (me.spd > 0 ? 1.5 : 1);
+    let sp = 310 * (me.spd > 0 ? 1.5 : 1);
     if (this.dashT > 0) sp *= 3;
     me.vx = ix * sp; me.vy = iy * sp;
     me.moving = il > 0.15;

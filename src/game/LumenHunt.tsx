@@ -39,7 +39,7 @@ export default function LumenHunt() {
 
   useEffect(() => {
     const g = new Game(cvRef.current!, mmRef.current!);
-    gameRef.current = g; (window as any).__g = g;
+    gameRef.current = g;
     let tt: ReturnType<typeof setTimeout>;
     g.onHud = setHud;
     g.onToast = (t) => { setToast(t); clearTimeout(tt); tt = setTimeout(() => setToast(""), 2200); };
@@ -169,14 +169,15 @@ export default function LumenHunt() {
     setKnob({ x: dx, y: dy });
     const g = gameRef.current!;
     const deadzone = 4;
-    const fullThreshold = 18;
+    const fullThreshold = 14;
     if (l < deadzone) {
       g.jx = 0;
       g.jy = 0;
     } else {
       const strength = Math.min(1, (l - deadzone) / (fullThreshold - deadzone));
-      g.jx = (dx / l) * strength;
-      g.jy = (dy / l) * strength;
+      const cl = Math.hypot(dx, dy) || 1;
+      g.jx = (dx / cl) * strength;
+      g.jy = (dy / cl) * strength;
     }
   };
   const jEnd = () => { jPointer.current = null; setKnob({ x: 0, y: 0 }); const g = gameRef.current!; g.jx = g.jy = 0; };
