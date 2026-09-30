@@ -1,0 +1,380 @@
+import { useEffect, useRef, useState } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { supabase } from "@/integrations/supabase/client";
+import { Game, type EndInfo, type Hud, type Role } from "./engine";
+
+const DIFFS = [
+  { name: "Normal", m: 1, h: 150 },
+  { name: "Hard", m: 1.12, h: 220 },
+  { name: "Insane", m: 1.25, h: 300 },
+];
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+type Screen = "menu" | "play" | "end";
+
+export default function LumenHunt() {
+  const cvRef = useRef<HTMLCanvasElement>(null);
+  const mmRef = useRef<HTMLCanvasElement>(null);
+  const gameRef = useRef<Game | null>(null);
+  const chRef = useRef<RealtimeChannel | null>(null);
+  const myId = useRef(Math.random().toString(36).slice(2));
+  const startedRef = useRef(false);
+
+  const [screen, setScreen] = useState<Screen>("menu");
+  const [tab, setTab] = useState<"solo" | "mp">("solo");
+  const [diff, setDiff] = useState(1);
+  const [hud, setHud] = useState<Hud | null>(null);
+  const [end, setEnd] = useState<EndInfo | null>(null);
+  const [toast, setToast] = useState("");
+  const [paused, setPaused] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [level, setLevel] = useState(1);
+
+  // multiplayer ui state
+  const [role, setRole] = useState<Role>("h");
+  const [codeIn, setCodeIn] = useState("");
+  const [room, setRoom] = useState("");
+  const [isHost, setIsHost] = useState(false);
+  const [mpMsg, setMpMsg] = useState("");
+
+  useEffect(() => {
+    const g = new Game(cvRef.current!, mmRef.current!);
+    gameRef.current = g;
+    let tt: ReturnType<typeof setTimeout>;
+    g.onHud = setHud;
+    g.onToast = (t) => { setToast(t); clearTimeout(tt); tt = setTimeout(() => setToast(""), 2200); };
+    g.onEnd = (e) => { setEnd(e); setScreen("end"); };
+    const kd = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.tagName === "INPUT") return;
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+      g.keys[k] = true;
+      if (k === " ") { e.preventDefault(); g.doScan(); }
+      if (k === "Shift") g.doDash();
+      if (k === "e") g.doDecoy();
+      if (k === "p" || k === "Escape") { g.togglePause(); setPaused(g.paused); }
+      if (k.startsWith("Arrow")) e.preventDefault();
+    };
+    const ku = (e: KeyboardEvent) => { const k = e.key.length === 1 ? e.key.toLowerCase() : e.key; g.keys[k] = false; };
+    const vis = () => { g.keys = {}; g.jx = g.jy = 0; g.last = performance.now(); };
+    addEventListener("keydown", kd);
+    addEventListener("keyup", ku);
+    document.addEventListener("visibilitychange", vis);
+    return () => {
+      removeEventListener("keydown", kd); removeEventListener("keyup", ku);
+      document.removeEventListener("visibilitychange", vis);
+      g.destroy();
+      if (chRef.current) void supabase.removeChannel(chRef.current);
+    };
+  }, []);
+
+  // ---------- solo ----------
+  const playSolo = (lvl = 1) => {
+    const d = DIFFS[diff] ?? DIFFS[0];
+    if (!d) return;
+    setLevel(lvl); setEnd(null); setPaused(false);
+    gameRef.current!.startSolo(d.m, d.h, lvl);
+    setScreen("play");
+  };
+
+  // ---------- multiplayer ----------
+  const leaveRoom = (msg = "") => {
+    if (chRef.current) void supabase.removeChannel(chRef.current);
+    chRef.current = null; startedRef.current = false;
+    gameRef.current?.stop();
+    setRoom(""); setIsHost(false); setMpMsg(msg); setScreen("menu"); setTab("mp");
+  };
+
+  const beginMatch = (seed: number, myRole: Role) => {
+    startedRef.current = true;
+    setEnd(null); setPaused(false);
+    const ch = chRef.current!;
+    gameRef.current!.startMp(seed, myRole, {
+      send: (ev, payload) => { void ch.send({ type: "broadcast", event: ev, payload }); },
+    });
+    setScreen("play");
+  };
+
+  const hostStart = () => {
+    const seed = (Math.random() * 1e9) | 0;
+    void chRef.current?.send({ type: "broadcast", event: "start", payload: { seed, hr: role } });
+    beginMatch(seed, role);
+  };
+
+  const joinRoom = (code: string, host: boolean) => {
+    if (chRef.current) void supabase.removeChannel(chRef.current);
+    startedRef.current = false;
+    setRoom(code); setIsHost(host);
+    setMpMsg(host ? "Connecting…" : `Joining room ${code}…`);
+    const ch = supabase.channel(`lumen-${code}`, { config: { broadcast: { self: false }, presence: { key: myId.current } } });
+    chRef.current = ch;
+    let found = host;
+
+    ch.on("presence", { event: "sync" }, () => {
+      const st = ch.presenceState() as Record<string, { host?: boolean }[]>;
+      const ids = Object.keys(st);
+      const hostHere = ids.some((i) => st[i]?.[0]?.host);
+      if (!host) {
+        if (hostHere) found = true;
+        if (!hostHere && found) { if (startedRef.current || found) leaveRoom("The host left the room."); return; }
+        if (ids.length > 2) { const sorted = ids.sort(); if (sorted.indexOf(myId.current) > 1) leaveRoom("Room is full."); }
+        if (hostHere && !startedRef.current) setMpMsg("Connected! Waiting for the host to start…");
+      } else {
+        if (ids.length >= 2 && !startedRef.current) { setMpMsg("Friend joined! Starting…"); setTimeout(() => { if (!startedRef.current && chRef.current === ch) hostStart(); }, 600); }
+        else if (ids.length < 2 && startedRef.current) { gameRef.current?.stop(); leaveRoom("Your friend left the room."); }
+      }
+    });
+    ch.on("broadcast", { event: "start" }, ({ payload }) => {
+      if (host) return;
+      beginMatch(payload.seed, payload.hr === "h" ? "s" : "h");
+    });
+    for (const ev of ["st", "scan", "spot", "decoy"]) {
+      ch.on("broadcast", { event: ev }, ({ payload }) => gameRef.current?.netIn(ev, payload));
+    }
+    ch.on("broadcast", { event: "end" }, ({ payload }) => gameRef.current?.remoteEnd(payload.w, payload.text));
+    ch.on("broadcast", { event: "rematch" }, ({ payload }) => { if (!host) beginMatch(payload.seed, payload.hr === "h" ? "s" : "h"); });
+
+    ch.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await ch.track({ host });
+        if (host) setMpMsg("Share this code with a friend — waiting…");
+        else setTimeout(() => { if (chRef.current === ch && !found) leaveRoom(`Room ${code} not found.`); }, 7000);
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        leaveRoom("Connection problem — please try again.");
+      }
+    });
+  };
+
+  const createRoom = () => {
+    let c = "";
+    for (let i = 0; i < 5; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    joinRoom(c, true);
+  };
+
+  const rematch = () => {
+    const seed = (Math.random() * 1e9) | 0;
+    void chRef.current?.send({ type: "broadcast", event: "rematch", payload: { seed, hr: role } });
+    beginMatch(seed, role);
+  };
+
+  // ---------- touch controls ----------
+  const jsRef = useRef<HTMLDivElement>(null);
+  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const jPointer = useRef<number | null>(null);
+  const jMove = (e: React.PointerEvent) => {
+    if (jPointer.current !== e.pointerId) return;
+    const r = jsRef.current!.getBoundingClientRect();
+    let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+    const max = r.width / 2 - 20, l = Math.hypot(dx, dy);
+    if (l > max) { dx = (dx / l) * max; dy = (dy / l) * max; }
+    setKnob({ x: dx, y: dy });
+    const g = gameRef.current!;
+    const deadzone = 4;
+    const fullThreshold = 18;
+    if (l < deadzone) {
+      g.jx = 0;
+      g.jy = 0;
+    } else {
+      const strength = Math.min(1, (l - deadzone) / (fullThreshold - deadzone));
+      g.jx = (dx / l) * strength;
+      g.jy = (dy / l) * strength;
+    }
+  };
+  const jEnd = () => { jPointer.current = null; setKnob({ x: 0, y: 0 }); const g = gameRef.current!; g.jx = g.jy = 0; };
+
+  const g = gameRef.current;
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const playing = screen === "play";
+
+  return (
+    <div className="fixed inset-0 select-none overflow-hidden bg-void text-ink" style={{ touchAction: "none" }}>
+      <canvas ref={cvRef} className="absolute inset-0 h-full w-full" />
+
+      {/* HUD */}
+      <div className={`pointer-events-none absolute inset-x-0 top-2 flex items-start justify-between px-3 text-sm font-bold ${playing ? "" : "invisible"}`}>
+        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
+          {hud?.mp
+            ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal} · ⏱ ${fmt(hud.timeLeft ?? 0)} · ${room}`
+            : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · Lv ${hud?.level ?? 1}`}
+        </div>
+        {hud?.seen && <div className="rounded-full border border-neon-red bg-void-glass px-3 py-1.5 text-neon-red">👁 SEEN</div>}
+        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
+          {hud?.mp ? `You: ${hud.role === "h" ? "HIDER" : "SEEKER"}` : hud?.seekers}
+        </div>
+      </div>
+      {playing && hud?.alarm && (
+        <div className="pointer-events-none absolute left-1/2 top-14 -translate-x-1/2 rounded-full border border-neon-red bg-void-glass px-4 py-1.5 text-sm font-bold">{hud.alarm}</div>
+      )}
+      <canvas
+        ref={mmRef}
+        width={124}
+        height={124}
+        className={`pointer-events-none absolute left-3 top-14 h-[110px] w-[110px] rounded-xl border border-neon-violet/40 ${playing ? "" : "invisible"}`}
+      />
+      <div className={`pointer-events-none absolute inset-x-0 top-[24%] text-center text-lg font-bold drop-shadow transition-opacity ${toast && playing ? "opacity-100" : "opacity-0"}`}>{toast}</div>
+
+      {playing && (
+        <>
+          <div className="absolute right-3 top-14 flex flex-col gap-2">
+            <button className="h-10 w-10 rounded-full border border-neon-violet/40 bg-void-glass" onClick={() => { g?.togglePause(); setPaused(!!g?.paused); }} aria-label="Pause">⏸</button>
+            <button className="h-10 w-10 rounded-full border border-neon-violet/40 bg-void-glass" onClick={() => { if (g) { g.muted = !g.muted; setMuted(g.muted); } }} aria-label="Sound">{muted ? "🔇" : "🔊"}</button>
+          </div>
+
+          {/* joystick */}
+          <div
+            ref={jsRef}
+            className="absolute bottom-7 left-5 h-32 w-32 rounded-full border-2 border-neon-blue/60 bg-neon-blue/10"
+            onPointerDown={(e) => { jPointer.current = e.pointerId; (e.target as HTMLElement).setPointerCapture(e.pointerId); jMove(e); }}
+            onPointerMove={jMove}
+            onPointerUp={jEnd}
+            onPointerCancel={jEnd}
+          >
+            <div
+              className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 rounded-full bg-neon-blue shadow-[0_0_18px_var(--neon-blue)]"
+              style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
+            />
+          </div>
+
+          {/* action buttons */}
+          <button
+            onPointerDown={(e) => { e.preventDefault(); g?.doScan(); }}
+            className="absolute bottom-9 right-6 flex h-24 w-24 items-center justify-center rounded-full bg-neon-blue text-sm font-extrabold text-ink shadow-[0_0_24px_var(--neon-blue)]"
+            style={{ opacity: hud && hud.scanCd > 0 ? 0.45 : 1 }}
+          >
+            {hud && hud.scanCd > 0 ? Math.ceil(hud.scanCd) : "SCAN"}
+          </button>
+          <button
+            onPointerDown={(e) => { e.preventDefault(); g?.doDash(); }}
+            className="absolute bottom-8 right-36 flex h-16 w-16 items-center justify-center rounded-full bg-neon-yellow text-xs font-extrabold text-void"
+            style={{ opacity: hud && hud.dashCd > 0 ? 0.45 : 1 }}
+          >
+            {hud && hud.dashCd > 0 ? Math.ceil(hud.dashCd) : "DASH"}
+          </button>
+          {hud?.role === "h" && (
+            <button
+              onPointerDown={(e) => { e.preventDefault(); g?.doDecoy(); }}
+              className="absolute bottom-40 right-8 flex h-16 w-16 items-center justify-center rounded-full bg-neon-violet text-xs font-extrabold text-void"
+              style={{ opacity: hud.decoyCd > 0 ? 0.45 : 1 }}
+            >
+              {hud.decoyCd > 0 ? Math.ceil(hud.decoyCd) : "DECOY"}
+            </button>
+          )}
+
+          {paused && (
+            <button className="absolute inset-0 flex items-center justify-center bg-void/85 text-2xl font-extrabold" onClick={() => { g?.togglePause(); setPaused(false); }}>
+              ⏸ Paused — tap to resume
+            </button>
+          )}
+        </>
+      )}
+
+      {/* menus */}
+      {screen !== "play" && (
+        <div
+          className="absolute inset-0 z-20 flex flex-col items-center gap-4 overflow-y-auto px-6 pb-10 pt-[8vh] text-center"
+          style={{ background: "radial-gradient(circle at 15% 20%, color-mix(in oklch, var(--neon-blue) 40%, transparent), transparent 45%), radial-gradient(circle at 85% 80%, color-mix(in oklch, var(--neon-red) 35%, transparent), transparent 45%), var(--void)" }}
+        >
+          <h1 className="text-4xl font-black tracking-tight">🔵 Lumen Hunt 🔴</h1>
+
+          {screen === "end" && end ? (
+            <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-6 backdrop-blur-xl">
+              <h2 className="text-3xl font-extrabold">{end.win ? "🏆 YOU WIN!" : "💀 YOU LOSE"}</h2>
+              <p className="text-ink-dim">{end.text}</p>
+              {room ? (
+                <>
+                  {isHost ? (
+                    <>
+                      <RoleToggle role={role} setRole={setRole} />
+                      <button className="rounded-full bg-neon-blue px-8 py-3 text-lg font-extrabold" onClick={rematch}>Rematch ▶</button>
+                    </>
+                  ) : (
+                    <p className="font-bold text-neon-yellow">Waiting for the host to start a rematch…</p>
+                  )}
+                  <button className="rounded-2xl border border-ink/20 px-4 py-2 font-bold" onClick={() => leaveRoom()}>Leave room</button>
+                </>
+              ) : (
+                <>
+                  <button className="rounded-full bg-neon-blue px-8 py-3 text-lg font-extrabold" onClick={() => playSolo(end.nextLevel ? level + 1 : 1)}>
+                    {end.nextLevel ? `Next level ${level + 1} ▶` : "Play again"}
+                  </button>
+                  <button className="rounded-2xl border border-ink/20 px-4 py-2 font-bold" onClick={() => setScreen("menu")}>Menu</button>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="flex rounded-full border border-ink/15 bg-ink/5 p-1 backdrop-blur-xl">
+                {(["solo", "mp"] as const).map((t) => (
+                  <button key={t} onClick={() => setTab(t)} className={`rounded-full px-5 py-2 font-extrabold ${tab === t ? "bg-neon-blue" : "text-ink-dim"}`}>
+                    {t === "solo" ? "🎮 Solo" : "👥 Multiplayer"}
+                  </button>
+                ))}
+              </div>
+              <p className="text-ink-dim">Find the real cubes, avoid the seekers.</p>
+
+              {tab === "solo" ? (
+                <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-5 backdrop-blur-xl">
+                  <div className="flex gap-2">
+                    {DIFFS.map((d, i) => (
+                      <button key={d.name} onClick={() => setDiff(i)} className={`rounded-2xl border px-4 py-2 text-sm font-bold ${diff === i ? "border-neon-red bg-neon-red" : "border-ink/20 text-ink-dim"}`}>{d.name}</button>
+                    ))}
+                  </div>
+                  <button className="rounded-full bg-neon-blue px-10 py-3 text-xl font-extrabold shadow-[0_0_20px_var(--neon-blue)]" onClick={() => playSolo(1)}>Play solo</button>
+                  <details className="max-w-xs text-left text-sm text-ink-dim">
+                    <summary className="cursor-pointer text-center font-bold text-ink">How to play</summary>
+                    <p className="mt-2 leading-relaxed">
+                      You are the blue hider. Cubes are invisible — SCAN to reveal them for 4s. Only one in each set is real; fakes are duds. Collect 5 real cubes to win.
+                      Red seekers hunt you: they see you in line of sight and hear you move nearby (stand still to stay quiet). Their scan rings expose you for 5s.
+                      Power-ups: ⚡ speed, 👻 cloak, 🔄 scan recharge, ❄️ freeze. DASH (Shift) is fast but noisy, DECOY (E) lures seekers, and 🌀 portals teleport you.
+                      Alarms track you for 4s. Every win makes the next level harder. Controls: WASD/arrows, Space to scan.
+                    </p>
+                  </details>
+                </div>
+              ) : (
+                <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-3xl border border-ink/15 bg-ink/5 p-5 backdrop-blur-xl">
+                  {!room ? (
+                    <>
+                      <RoleToggle role={role} setRole={setRole} />
+                      <button className="rounded-2xl border border-neon-blue px-5 py-2 font-extrabold" onClick={createRoom}>Create room</button>
+                      <div className="flex gap-2">
+                        <input
+                          value={codeIn}
+                          onChange={(e) => setCodeIn(e.target.value.toUpperCase())}
+                          maxLength={5}
+                          placeholder="CODE"
+                          className="w-28 rounded-2xl border border-ink/20 bg-ink/5 px-3 py-2 text-center font-extrabold uppercase tracking-[0.3em] text-ink outline-none"
+                        />
+                        <button
+                          className="rounded-2xl border border-neon-blue px-4 py-2 font-extrabold"
+                          onClick={() => { const c = codeIn.trim(); if (c.length < 4) { setMpMsg("Enter the room code"); return; } (document.activeElement as HTMLElement)?.blur(); joinRoom(c, false); }}
+                        >Join</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {isHost && <div className="text-3xl font-black tracking-[0.35em]">{room}</div>}
+                      <button className="rounded-2xl border border-ink/20 px-4 py-2 font-bold" onClick={() => leaveRoom()}>Leave room</button>
+                    </>
+                  )}
+                  <p className="min-h-5 font-bold text-neon-yellow">{mpMsg}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoleToggle({ role, setRole }: { role: Role; setRole: (r: Role) => void }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-ink-dim">I am:</span>
+      {(["h", "s"] as const).map((r) => (
+        <button key={r} onClick={() => setRole(r)} className={`rounded-2xl border px-4 py-2 text-sm font-bold ${role === r ? "border-neon-red bg-neon-red" : "border-ink/20 text-ink-dim"}`}>
+          {r === "h" ? "🔵 Hider" : "🔴 Seeker"}
+        </button>
+      ))}
+    </div>
+  );
+}
