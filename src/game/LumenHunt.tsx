@@ -39,7 +39,7 @@ export default function LumenHunt() {
 
   useEffect(() => {
     const g = new Game(cvRef.current!, mmRef.current!);
-    gameRef.current = g;
+    gameRef.current = g; (window as any).__g = g;
     let tt: ReturnType<typeof setTimeout>;
     g.onHud = setHud;
     g.onToast = (t) => { setToast(t); clearTimeout(tt); tt = setTimeout(() => setToast(""), 2200); };
