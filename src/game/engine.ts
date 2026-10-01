@@ -113,8 +113,8 @@ export class Game {
   parts: { x: number; y: number; vx: number; vy: number; l: number; c: string }[] = [];
   trail: TrailPt[] = [];
   foeTrail: TrailPt[] = [];
-  decoy: { x: number; y: number; t: number; path: { x: number; y: number }[]; trail: TrailPt[] } | null = null;
-  foeDecoy: { x: number; y: number; t: number; path: { x: number; y: number }[]; trail: TrailPt[] } | null = null;
+  decoy: { x: number; y: number; t: number; path: { x: number; y: number }[]; trail: TrailPt[]; spd?: number } | null = null;
+  foeDecoy: { x: number; y: number; t: number; path: { x: number; y: number }[]; trail: TrailPt[]; spd?: number } | null = null;
   companion = false;
   foeCloak = false;
   hunt = false;
@@ -332,7 +332,7 @@ export class Game {
           if (h.decoyCd <= 0 && d < 220) {
             h.decoyCd = 12;
             const tg = this.freeTile(Math.random, h, 300);
-            this.foeDecoy = { x: h.x, y: h.y, t: 4, path: this.bfs(h, tg), trail: [] };
+            this.foeDecoy = { x: h.x, y: h.y, t: 4, path: this.bfs(h, tg), trail: [], spd: 255 * sp };
           }
         } else if (!h.path.length) { h.target = null; h.path = this.bfs(h, this.freeTile(Math.random, h, 120)); }
       }
@@ -438,7 +438,7 @@ export class Game {
     if (!this.running || this.paused || this.decoyCd > 0 || (this.mp && this.role === "s")) return;
     this.decoyCd = 10;
     const tgt = this.freeTile(Math.random, this.me, 360);
-    this.decoy = { x: this.me.x, y: this.me.y, t: 4, path: this.bfs(this.me, tgt), trail: [] };
+    this.decoy = { x: this.me.x, y: this.me.y, t: 4, path: this.bfs(this.me, tgt), trail: [], spd: 310 * (this.me.spd > 0 ? 1.5 : 1) };
     this.snd(700, 0.3, "triangle", 0.05, 350);
     this.onToast("🪞 Decoy dropped");
     if (this.mp) this.net?.send("decoy", { x: this.me.x, y: this.me.y, tx: tgt.x, ty: tgt.y });
@@ -468,7 +468,7 @@ export class Game {
     } else if (ev === "decoy") {
       const st = { x: p['x'] as number, y: p['y'] as number };
       const tg = { x: (p['tx'] as number) ?? st.x, y: (p['ty'] as number) ?? st.y };
-      this.foeDecoy = { ...st, t: 4, path: this.bfs(st, tg), trail: [] };
+      this.foeDecoy = { ...st, t: 4, path: this.bfs(st, tg), trail: [], spd: 310 };
     }
   }
 
@@ -675,7 +675,8 @@ export class Game {
     if (!d) return null;
     d.t -= dt;
     if (d.t <= 0) { this.burst(d.x, d.y, "#4f83ff", 10); return null; }
-    let move = 285 * dt;
+    let move = (d.spd ?? 310) * dt;
+    if (d.path.length < 2) d.path.push(...this.bfs(d.path.at(-1) ?? d, this.freeTile(Math.random, d, 200)).slice(1));
     while (move > 0 && d.path.length) {
       const n = d.path[0]!;
       const dx = n.x - d.x, dy = n.y - d.y, l = Math.hypot(dx, dy);
