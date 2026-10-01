@@ -421,7 +421,7 @@ export class Game {
   // ---------- actions ----------
   doScan() {
     if (!this.running || this.paused || this.scanCd > 0) return;
-    this.scanCd = this.role === "s" ? 5 : 3.5;
+    this.scanCd = this.role === "s" ? 3 : 3.5;
     const maxR = this.role === "s" ? 360 : 260;
     this.scans.push({ x: this.me.x, y: this.me.y, t: 0, owner: "me", hit: false, maxR });
     this.snd(520, 0.5, "sine", 0.05, 1400);
