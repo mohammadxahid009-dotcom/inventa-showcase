@@ -30,7 +30,6 @@ export default function LumenHunt() {
   const [muted, setMuted] = useState(false);
   const [level, setLevel] = useState(1);
   const [soloRole, setSoloRole] = useState<Role>("h");
-  const [lastHunt, setLastHunt] = useState(false);
 
   // multiplayer ui state
   const [role, setRole] = useState<Role>("h");
@@ -86,7 +85,6 @@ export default function LumenHunt() {
     const d = DIFFS[diff] ?? DIFFS[0];
     if (!d) return;
     setLevel(lvl); setEnd(null); setPaused(false);
-    setLastHunt(soloRole === "s");
     if (soloRole === "s") gameRef.current!.startHunt(d.m, lvl);
     else gameRef.current!.startSolo(d.m, d.h, lvl);
     setScreen("play");
