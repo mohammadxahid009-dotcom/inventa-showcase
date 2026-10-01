@@ -132,6 +132,7 @@ export class Game {
   diff = 1.12;
   hearR = 220;
   scanCd = 0;
+  mySpd = 220;
   dashCd = 0;
   dashT = 0;
   decoyCd = 0;
@@ -438,10 +439,12 @@ export class Game {
     if (!this.running || this.paused || this.decoyCd > 0 || (this.mp && this.role === "s")) return;
     this.decoyCd = 10;
     const tgt = this.freeTile(Math.random, this.me, 360);
-    this.decoy = { x: this.me.x, y: this.me.y, t: 4, path: this.bfs(this.me, tgt), trail: [], spd: 310 * (this.me.spd > 0 ? 1.5 : 1) };
+    // match how fast the hider has actually been travelling (walls, joystick tilt, etc.)
+    const ds = Math.round(Math.min(310 * (this.me.spd > 0 ? 1.5 : 1), Math.max(150, this.mySpd)));
+    this.decoy = { x: this.me.x, y: this.me.y, t: 4, path: this.bfs(this.me, tgt), trail: [], spd: ds };
     this.snd(700, 0.3, "triangle", 0.05, 350);
     this.onToast("🪞 Decoy dropped");
-    if (this.mp) this.net?.send("decoy", { x: this.me.x, y: this.me.y, tx: tgt.x, ty: tgt.y });
+    if (this.mp) this.net?.send("decoy", { x: this.me.x, y: this.me.y, tx: tgt.x, ty: tgt.y, s: ds });
   }
   togglePause() { if (this.running) { this.paused = !this.paused; this.last = performance.now(); } }
 
@@ -468,7 +471,7 @@ export class Game {
     } else if (ev === "decoy") {
       const st = { x: p['x'] as number, y: p['y'] as number };
       const tg = { x: (p['tx'] as number) ?? st.x, y: (p['ty'] as number) ?? st.y };
-      this.foeDecoy = { ...st, t: 4, path: this.bfs(st, tg), trail: [], spd: 310 };
+      this.foeDecoy = { ...st, t: 4, path: this.bfs(st, tg), trail: [], spd: typeof p['s'] === "number" ? p['s'] : 220 };
     }
   }
 
@@ -505,6 +508,8 @@ export class Game {
     const oldX = me.x, oldY = me.y;
     const steps = Math.ceil((sp * dt) / 6) || 1;
     for (let i = 0; i < steps; i++) this.mv(me, (me.vx * dt) / steps, (me.vy * dt) / steps);
+    const realD = Math.hypot(me.x - oldX, me.y - oldY);
+    if (dt > 0 && this.dashT <= 0 && realD > 0.2 && realD < 40) this.mySpd += (realD / dt - this.mySpd) * Math.min(1, dt * 3);
     for (const point of this.trail) point.life -= dt;
     this.trail = this.trail.filter((point) => point.life > 0);
     const lastPoint = this.trail.at(-1);
