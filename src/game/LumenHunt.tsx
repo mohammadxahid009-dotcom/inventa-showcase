@@ -280,9 +280,15 @@ export default function LumenHunt() {
           )}
 
           {paused && (
-            <button className="absolute inset-0 flex items-center justify-center bg-void/85 text-2xl font-extrabold" onClick={() => { g?.togglePause(); setPaused(false); }}>
-              ⏸ Paused — tap to resume
-            </button>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-void/85">
+              <div className="text-2xl font-extrabold">⏸ Paused</div>
+              <button className="w-48 rounded-2xl bg-primary px-4 py-3 font-bold text-primary-foreground" onClick={() => { g?.togglePause(); setPaused(false); }}>
+                ▶ Resume
+              </button>
+              <button className="w-48 rounded-2xl border border-destructive/60 px-4 py-3 font-bold text-destructive" onClick={() => { if (confirm("Give up this match?")) { setPaused(false); g?.giveUp(); } }}>
+                🏳 Give up
+              </button>
+            </div>
           )}
         </>
       )}
