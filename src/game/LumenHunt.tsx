@@ -139,7 +139,7 @@ export default function LumenHunt() {
       if (host) return;
       beginMatch(payload.seed, payload.hr === "h" ? "s" : "h", !!payload.co);
     });
-    for (const ev of ["st", "scan", "spot", "decoy"]) {
+    for (const ev of ["st", "scan", "spot", "decoy", "pow"]) {
       ch.on("broadcast", { event: ev }, ({ payload }) => gameRef.current?.netIn(ev, payload));
     }
     ch.on("broadcast", { event: "end" }, ({ payload }) => gameRef.current?.remoteEnd(payload.w, payload.text));
