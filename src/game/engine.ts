@@ -357,7 +357,7 @@ export class Game {
   togglePause() { if (this.running) { this.paused = !this.paused; this.last = performance.now(); } }
 
   // ---------- network in ----------
-  netIn(ev: string, p: Record<string, number | boolean>) {
+  netIn(ev: string, p: Record<string, number | boolean | string>) {
     if (!this.running || !this.foe) return;
     if (ev === "st") {
       this.foe.tx = p['x'] as number; this.foe.ty = p['y'] as number;
@@ -685,7 +685,7 @@ export class Game {
     if (!f || !f.seen) return false;
     const d = Math.hypot(f.x - this.me.x, f.y - this.me.y);
     if (this.role === "h") return d < 340;
-    return f.rev > 0;
+    return f.rev > 0 && !this.foeCloak;
   }
 
   finish(win: boolean, text: string) {
