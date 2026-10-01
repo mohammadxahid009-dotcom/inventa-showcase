@@ -353,6 +353,7 @@ export class Game {
         this.prints.push({ x: h.x, y: h.y, a: Math.atan2(h.y - oy, h.x - ox), life: 5 });
       if (d < h.r + me.r - 2) {
         this.hiders = this.hiders.filter((x) => x !== h);
+        this.foeDecoy = null; h.path = [];
         this.burst(h.x, h.y, h.hue, 24); this.snd(1200, 0.3, "triangle", 0.07, 600); this.vib([80]);
         this.score++;
         if (!this.hiders.length) return this.finish(true, `Level ${this.level} cleared — you caught them all!`);
