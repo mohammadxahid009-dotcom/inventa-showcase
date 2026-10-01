@@ -496,17 +496,6 @@ export class Game {
     if (il > 1) { ix /= il; iy /= il; }
     this.frozenMe = Math.max(0, this.frozenMe - dt);
     this.trackT = Math.max(0, this.trackT - dt);
-    if (this.hunt) for (const h of this.hiders) {
-      const hd = Math.hypot(h.x - me.x, h.y - me.y);
-      if (this.hiderVisible(h) || hd > 420) continue;
-      const ang = Math.atan2(h.y - me.y, h.x - me.x), near = 1 - hd / 420;
-      const pulse = 0.5 + 0.5 * Math.sin(now / (110 + (1 - near) * 200));
-      const rad = Math.min(W, H) * 0.32;
-      c.save(); c.translate(W / 2 + Math.cos(ang) * rad, H / 2 + Math.sin(ang) * rad); c.rotate(ang);
-      c.globalAlpha = 0.35 + 0.5 * near * pulse; c.fillStyle = "#ff3b4e"; c.shadowColor = "#ff3b4e"; c.shadowBlur = 14;
-      c.beginPath(); c.moveTo(16, 0); c.lineTo(-8, -11); c.lineTo(-3, 0); c.lineTo(-8, 11); c.closePath(); c.fill();
-      c.restore();
-    }
     if (this.frozenMe > 0) { ix = 0; iy = 0; }
     let sp = 310 * (me.spd > 0 ? 1.5 : 1);
     if (this.dashT > 0) sp *= 3;
@@ -1048,6 +1037,17 @@ export class Game {
         c.beginPath(); c.moveTo(16, 0); c.lineTo(-8, -11); c.lineTo(-3, 0); c.lineTo(-8, 11); c.closePath(); c.fill();
         c.restore();
       }
+    }
+    if (this.hunt) for (const h of this.hiders) {
+      const hd = Math.hypot(h.x - me.x, h.y - me.y);
+      if (this.hiderVisible(h) || hd > 420) continue;
+      const ang = Math.atan2(h.y - me.y, h.x - me.x), near = 1 - hd / 420;
+      const pulse = 0.5 + 0.5 * Math.sin(now / (110 + (1 - near) * 200));
+      const rad = Math.min(W, H) * 0.32;
+      c.save(); c.translate(W / 2 + Math.cos(ang) * rad, H / 2 + Math.sin(ang) * rad); c.rotate(ang);
+      c.globalAlpha = 0.35 + 0.5 * near * pulse; c.fillStyle = "#ff3b4e"; c.shadowColor = "#ff3b4e"; c.shadowBlur = 14;
+      c.beginPath(); c.moveTo(16, 0); c.lineTo(-8, -11); c.lineTo(-3, 0); c.lineTo(-8, 11); c.closePath(); c.fill();
+      c.restore();
     }
     if (this.frozenMe > 0) { c.fillStyle = `rgba(140,230,255,${0.18 + 0.05 * Math.sin(now / 90)})`; c.fillRect(0, 0, W, H); }
     this.drawMini();
