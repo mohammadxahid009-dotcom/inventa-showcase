@@ -786,6 +786,16 @@ export class Game {
     this.onEnd({ win, text, nextLevel: !this.mp && win });
   }
 
+  giveUp() {
+    if (!this.running) return;
+    this.paused = false;
+    if (this.mp) {
+      this.running = false;
+      this.net?.send("end", { w: this.role === "h" ? "s" : "h", text: "Your opponent gave up — you win!" });
+      this.onEnd({ win: false, text: "You gave up the match." });
+    } else this.finish(false, "You gave up.");
+  }
+
   remoteEnd(winner: Role, text: string) {
     if (!this.running) return;
     this.running = false;
