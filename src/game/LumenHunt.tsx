@@ -29,6 +29,7 @@ export default function LumenHunt() {
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(false);
   const [level, setLevel] = useState(1);
+  const [soloRole, setSoloRole] = useState<Role>("h");
 
   // multiplayer ui state
   const [role, setRole] = useState<Role>("h");
@@ -84,7 +85,8 @@ export default function LumenHunt() {
     const d = DIFFS[diff] ?? DIFFS[0];
     if (!d) return;
     setLevel(lvl); setEnd(null); setPaused(false);
-    gameRef.current!.startSolo(d.m, d.h, lvl);
+    if (soloRole === "s") gameRef.current!.startHunt(d.m, lvl);
+    else gameRef.current!.startSolo(d.m, d.h, lvl);
     setScreen("play");
   };
 
@@ -210,11 +212,13 @@ export default function LumenHunt() {
         <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
           {hud?.mp
             ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal} · ⏱ ${fmt(hud.timeLeft ?? 0)} · ${room}`
-            : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · Lv ${hud?.level ?? 1}`}
+            : hud?.hunt
+              ? `🎯 ${hud.score}/2 caught · ⏱ ${fmt(hud.timeLeft ?? 0)} · Lv ${hud.level}`
+              : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · Lv ${hud?.level ?? 1}`}
         </div>
         {hud?.seen && <div className="rounded-full border border-neon-red bg-void-glass px-3 py-1.5 text-neon-red">👁 SEEN</div>}
         <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
-          {hud?.mp ? `You: ${hud.role === "h" ? "HIDER" : "SEEKER"}` : hud?.seekers}
+          {hud?.mp || hud?.hunt ? `You: ${hud.role === "h" ? "HIDER" : "HUNTER"}` : hud?.seekers}
         </div>
       </div>
       {playing && hud?.alarm && (
@@ -332,6 +336,15 @@ export default function LumenHunt() {
 
               {tab === "solo" ? (
                 <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-5 backdrop-blur-xl">
+                  <div className="flex items-center gap-2">
+                    <span className="text-ink-dim">Play as:</span>
+                    {(["h", "s"] as const).map((r) => (
+                      <button key={r} onClick={() => setSoloRole(r)} className={`rounded-2xl border px-4 py-2 text-sm font-bold ${soloRole === r ? "border-neon-blue bg-neon-blue" : "border-ink/20 text-ink-dim"}`}>
+                        {r === "h" ? "🔵 Hider" : "🔴 Hunter"}
+                      </button>
+                    ))}
+                  </div>
+                  {soloRole === "s" && <p className="text-xs text-ink-dim">Catch 2 AI hiders before time runs out. Scan, radar 📡 and tracker 👣 help you find them.</p>}
                   <div className="flex gap-2">
                     {DIFFS.map((d, i) => (
                       <button key={d.name} onClick={() => setDiff(i)} className={`rounded-2xl border px-4 py-2 text-sm font-bold ${diff === i ? "border-neon-red bg-neon-red" : "border-ink/20 text-ink-dim"}`}>{d.name}</button>

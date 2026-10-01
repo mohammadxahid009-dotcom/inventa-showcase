@@ -17,6 +17,7 @@ export type Hud = {
   alarm: string;
   role: Role;
   mp: boolean;
+  hunt: boolean;
   seekers: string;
 };
 export type EndInfo = { win: boolean; text: string; nextLevel?: boolean };
@@ -116,6 +117,8 @@ export class Game {
   foeDecoy: { x: number; y: number; t: number; path: { x: number; y: number }[]; trail: TrailPt[] } | null = null;
   companion = false;
   foeCloak = false;
+  hunt = false;
+  hiders: (Seeker & { rev: number; decoyCd: number })[] = [];
   powR: () => number = Math.random;
   powId = 0;
   frozenMe = 0;
@@ -267,7 +270,7 @@ export class Game {
   // ---------- setup ----------
   startSolo(diff: number, hear: number, level = 1) {
     this.audio();
-    this.mp = false; this.role = "h"; this.net = null;
+    this.mp = false; this.hunt = false; this.role = "h"; this.net = null;
     this.diff = diff; this.hearR = hear; this.level = level;
     this.g = genMaze(Math.random);
     this.resetCommon(ctr(1, 1));
@@ -285,9 +288,94 @@ export class Game {
     this.begin();
   }
 
+  startHunt(diff: number, level = 1) {
+    this.audio();
+    this.mp = false; this.hunt = true; this.role = "s"; this.net = null;
+    this.diff = diff; this.level = level;
+    this.g = genMaze(Math.random);
+    this.resetCommon(ctr(N - 2, N - 2));
+    for (let i = 0; i < 2; i++) {
+      const p = this.freeTile(Math.random, this.me, 560);
+      this.hiders.push({ ...p, r: 11, vx: 0, vy: 0, path: [], think: 0, scanCd: 0, frozen: 0, target: null, hue: ["#4f83ff", "#3bd1ff"][i] ?? "#4f83ff", trail: [], rev: 0, decoyCd: 6 + i * 3 });
+    }
+    for (let i = 0; i < 2; i++) this.portals.push({ a: this.freeTile(), b: this.freeTile(), c: ["#4fe3ff", "#ff6bd6"][i] ?? "#4fe3ff" });
+    this.timeLeft = Math.max(90, 150 - (level - 1) * 10);
+    this.powT = 4;
+    this.onToast("🔴 You are the HUNTER — catch both hiders before time runs out!");
+    this.begin();
+  }
+
+  updateHunt(dt: number) {
+    const me = this.me;
+    this.updatePowers(dt);
+    this.timeLeft -= dt;
+    for (const sc of this.scans) if (sc.owner === "me") for (const h of this.hiders)
+      if (Math.abs(Math.hypot(h.x - sc.x, h.y - sc.y) - scanR(sc)) < 16) h.rev = 5;
+    const sp = (1 + (this.level - 1) * 0.07) * this.diff;
+    let nearest = Infinity;
+    for (const h of [...this.hiders]) {
+      h.frozen = Math.max(0, h.frozen - dt); h.rev = Math.max(0, h.rev - dt);
+      h.think -= dt; h.decoyCd -= dt;
+      const d = Math.hypot(h.x - me.x, h.y - me.y);
+      if (h.rev <= 0) nearest = Math.min(nearest, d);
+      const alert = d < (me.moving ? (this.dashT > 0 ? 380 : 280) : 150);
+      if (h.think <= 0) {
+        h.think = alert ? 0.4 : 1.2;
+        if (alert) {
+          let best = h.path.at(-1) ?? { x: h.x, y: h.y }, bd = -1;
+          for (let i = 0; i < 6; i++) {
+            const t = this.freeTile(Math.random, h, 160);
+            const sc = Math.hypot(t.x - me.x, t.y - me.y) - Math.hypot(t.x - h.x, t.y - h.y) * 0.4;
+            if (sc > bd) { bd = sc; best = t; }
+          }
+          h.path = this.bfs(h, best); h.target = me;
+          if (h.decoyCd <= 0 && d < 220) {
+            h.decoyCd = 12;
+            const tg = this.freeTile(Math.random, h, 300);
+            this.foeDecoy = { x: h.x, y: h.y, t: 4, path: this.bfs(h, tg), trail: [] };
+          }
+        } else if (!h.path.length) { h.target = null; h.path = this.bfs(h, this.freeTile(Math.random, h, 120)); }
+      }
+      if (h.frozen > 0) continue;
+      const ox = h.x, oy = h.y;
+      let move = (h.target ? 255 : 110) * sp * dt;
+      while (move > 0 && h.path.length) {
+        const n = h.path[0]!;
+        const dx = n.x - h.x, dy = n.y - h.y, l = Math.hypot(dx, dy);
+        if (l <= move) { h.x = n.x; h.y = n.y; h.path.shift(); move -= l; }
+        else { h.x += (dx / l) * move; h.y += (dy / l) * move; move = 0; }
+      }
+      const moved = Math.hypot(h.x - ox, h.y - oy) > 0.2;
+      h.trail = this.decayTrail(h.trail, dt);
+      if (moved) this.pushTrail(h.trail, h.x, h.y, 0.5, 40);
+      const lp = this.prints.at(-1);
+      if (moved && this.trackT > 0 && (!lp || Math.hypot(lp.x - h.x, lp.y - h.y) > 18))
+        this.prints.push({ x: h.x, y: h.y, a: Math.atan2(h.y - oy, h.x - ox), life: 5 });
+      if (d < h.r + me.r - 2) {
+        this.hiders = this.hiders.filter((x) => x !== h);
+        this.burst(h.x, h.y, h.hue, 24); this.snd(1200, 0.3, "triangle", 0.07, 600); this.vib([80]);
+        this.score++;
+        if (!this.hiders.length) return this.finish(true, `Level ${this.level} cleared — you caught them all!`);
+        this.onToast("🎯 Caught one! One left…");
+      }
+    }
+    this.foeDecoy = this.stepDecoy(this.foeDecoy, dt);
+    for (const pr of this.prints) pr.life -= dt;
+    this.prints = this.prints.filter((pr) => pr.life > 0);
+    if (nearest < 420) {
+      this.heart -= dt;
+      if (this.heart <= 0) { this.heart = 0.35 + (nearest / 420) * 1.1; this.snd(70, 0.12, "sine", 0.08, 50); }
+    }
+    if (this.timeLeft <= 0) this.finish(false, "Time's up — the hiders escaped!");
+  }
+
+  hiderVisible(h: { x: number; y: number; rev: number }) {
+    return h.rev > 0 || Math.hypot(h.x - this.me.x, h.y - this.me.y) < 240;
+  }
+
   startMp(seed: number, role: Role, net: NetOut, companion = false) {
     this.audio();
-    this.mp = true; this.role = role; this.net = net; this.level = 1;
+    this.mp = true; this.hunt = false; this.role = role; this.net = net; this.level = 1;
     const R = rng(seed);
     this.g = genMaze(R);
     const hStart = ctr(1, 1), sStart = ctr(N - 2, N - 2);
@@ -309,7 +397,7 @@ export class Game {
 
   resetCommon(start: { x: number; y: number }) {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
-    this.foe = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
+    this.foe = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.scanCd = this.dashCd = this.dashT = this.decoyCd = this.portalCd = 0;
     this.powT = 6; this.alarmW = this.alarmA = 0; this.alarmT = 35; this.relocT = 45; this.shake = 0;
@@ -482,7 +570,7 @@ export class Game {
       }
     }
 
-    if (this.mp) this.updateMp(dt); else this.updateSolo(dt);
+    if (this.mp) this.updateMp(dt); else if (this.hunt) this.updateHunt(dt); else this.updateSolo(dt);
   }
 
   updateSolo(dt: number) {
@@ -544,7 +632,7 @@ export class Game {
     this.powT -= dt;
     if (this.powT <= 0) {
       this.powT = 8;
-      const ks: Power["k"][] = this.mp ? ["spd", "cloak", "scan", "freeze", "radar", "track"] : ["spd", "cloak", "scan", "freeze"];
+      const ks: Power["k"][] = this.mp || this.hunt ? ["spd", "cloak", "scan", "freeze", "radar", "track"] : ["spd", "cloak", "scan", "freeze"];
       const R = this.mp ? this.powR : Math.random;
       const k = ks[Math.floor(R() * ks.length)] ?? "spd";
       const t = this.freeTile(R);
@@ -565,13 +653,14 @@ export class Game {
         }
         if (p.k === "freeze") {
           for (const s of this.seekers) s.frozen = 3;
+          for (const h of this.hiders) h.frozen = 3;
           if (this.mp && hider) this.onToast("❄️ Hunters frozen for 3s!");
-          else if (this.mp) { if (this.foe) this.foe.rev = 2; this.onToast("❄️ Frost pulse — hider flashed!"); }
+          else if (this.mp || this.hunt) { if (this.foe) this.foe.rev = 2; this.onToast("❄️ Frost pulse — hider flashed!"); }
           else this.onToast("❄️ Seekers frozen!");
         }
         if (p.k === "radar") {
           if (hider) { this.scanCd = 0; me.spd = 3; this.onToast("📡 Radar jammed — scan + speed!"); }
-          else { if (this.foe) this.foe.rev = 3; this.onToast("📡 Radar ping — hider revealed!"); }
+          else { if (this.foe) this.foe.rev = 3; for (const h of this.hiders) h.rev = 3; this.onToast("📡 Radar ping — hider revealed!"); }
         }
         if (p.k === "track") {
           if (hider) { this.decoyCd = 0; this.onToast("👣 Decoy recharged"); }
@@ -721,9 +810,9 @@ export class Game {
     this.onHud({
       score: this.score, goal: this.goal, level: this.level,
       scanCd: this.scanCd, dashCd: this.dashCd, decoyCd: this.decoyCd,
-      seen: this.me.rev > 0, timeLeft: this.mp ? Math.max(0, this.timeLeft) : null,
+      seen: this.me.rev > 0, timeLeft: this.mp || this.hunt ? Math.max(0, this.timeLeft) : null,
       alarm: this.alarmA > 0 ? "🚨 ALARM — you are tracked!" : this.alarmW > 0 ? `🚨 Alarm in ${Math.ceil(this.alarmW)}s` : "",
-      role: this.role, mp: this.mp,
+      role: this.role, mp: this.mp, hunt: this.hunt,
       seekers: this.seekers.map((s) => (s.frozen > 0 ? "❄️" : s.target ? "🔴" : "⚪")).join(" "),
     });
   }
@@ -810,7 +899,7 @@ export class Game {
     }
 
     // hider footprints (seeker only)
-    if (this.mp && this.role === "s") for (const pr of this.prints) {
+    if ((this.mp || this.hunt) && this.role === "s") for (const pr of this.prints) {
       c.save(); c.translate(pr.x, pr.y); c.rotate(pr.a + Math.PI / 2);
       c.globalAlpha = Math.min(1, pr.life / 2) * (this.trackT > 0 ? 0.8 : 0.45);
       c.fillStyle = "#ffa24a";
@@ -905,6 +994,11 @@ export class Game {
       if (s.frozen > 0) { c.strokeStyle = "#8fe8ff"; c.lineWidth = 2; c.beginPath(); c.arc(s.x, s.y, s.r + 7, 0, 7); c.stroke(); }
     }
 
+    for (const h of this.hiders) if (this.hiderVisible(h)) {
+      c.globalAlpha = h.frozen > 0 ? 0.6 : 1; this.ball(h.x, h.y, h.r, h.hue, "#bcd4ff"); c.globalAlpha = 1;
+    }
+    if (this.hunt && this.foeDecoy && Math.hypot(this.foeDecoy.x - me.x, this.foeDecoy.y - me.y) < 240) this.ball(this.foeDecoy.x, this.foeDecoy.y, 11, "#4f83ff", "#bcd4ff");
+
     // opponent
     if (this.mp && this.foe && this.foeVisible()) {
       const f = this.foe;
@@ -944,6 +1038,17 @@ export class Game {
         c.restore();
       }
     }
+    if (this.hunt) for (const h of this.hiders) {
+      const hd = Math.hypot(h.x - me.x, h.y - me.y);
+      if (this.hiderVisible(h) || hd > 420) continue;
+      const ang = Math.atan2(h.y - me.y, h.x - me.x), near = 1 - hd / 420;
+      const pulse = 0.5 + 0.5 * Math.sin(now / (110 + (1 - near) * 200));
+      const rad = Math.min(W, H) * 0.32;
+      c.save(); c.translate(W / 2 + Math.cos(ang) * rad, H / 2 + Math.sin(ang) * rad); c.rotate(ang);
+      c.globalAlpha = 0.35 + 0.5 * near * pulse; c.fillStyle = "#ff3b4e"; c.shadowColor = "#ff3b4e"; c.shadowBlur = 14;
+      c.beginPath(); c.moveTo(16, 0); c.lineTo(-8, -11); c.lineTo(-3, 0); c.lineTo(-8, 11); c.closePath(); c.fill();
+      c.restore();
+    }
     if (this.frozenMe > 0) { c.fillStyle = `rgba(140,230,255,${0.18 + 0.05 * Math.sin(now / 90)})`; c.fillRect(0, 0, W, H); }
     this.drawMini();
   }
@@ -961,6 +1066,7 @@ export class Game {
     for (const p of this.pows) dot(p.x, p.y, POW[p.k].c, 2);
     for (const cb of this.cubes) if (cb.vis > 0) dot(cb.x, cb.y, "#ffc93c", 2.4);
     for (const s of this.seekers) dot(s.x, s.y, s.hue);
+    for (const h of this.hiders) if (this.hiderVisible(h)) dot(h.x, h.y, "#7fb0ff");
     if (this.mp && this.foe && this.foeVisible()) dot(this.foe.x, this.foe.y, this.role === "s" ? "#7fb0ff" : "#ff3b4e");
     dot(this.me.x, this.me.y, this.role === "s" ? "#ff6b7b" : "#7fb0ff", 3.2);
   }
