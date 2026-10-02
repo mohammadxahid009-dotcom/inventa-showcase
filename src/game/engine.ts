@@ -19,6 +19,11 @@ export type Hud = {
   mp: boolean;
   hunt: boolean;
   seekers: string;
+  weapon: "missile" | "rain" | null;
+  aiming: boolean;
+  lock: number;
+  ammo: number;
+  hp: number;
 };
 export type EndInfo = { win: boolean; text: string; nextLevel?: boolean };
 
@@ -36,10 +41,11 @@ type Seeker = Ent & {
   target: { x: number; y: number } | null;
   hue: string;
   trail: TrailPt[];
+  hp?: number;
 };
 type Cube = { x: number; y: number; real: boolean; vis: number };
 type Scan = { x: number; y: number; t: number; owner: "me" | "foe" | "ai"; hit: boolean; maxR?: number };
-type Power = { x: number; y: number; k: "spd" | "cloak" | "scan" | "freeze" | "radar" | "track"; id?: number };
+type Power = { x: number; y: number; k: "spd" | "cloak" | "scan" | "freeze" | "radar" | "track" | "missile" | "rain"; id?: number };
 type Portal = { a: { x: number; y: number }; b: { x: number; y: number }; c: string };
 
 const POW: Record<Power["k"], { e: string; c: string }> = {
@@ -49,7 +55,12 @@ const POW: Record<Power["k"], { e: string; c: string }> = {
   freeze: { e: "❄️", c: "#8fe8ff" },
   radar: { e: "📡", c: "#ff5a6e" },
   track: { e: "👣", c: "#ffa24a" },
+  missile: { e: "🚀", c: "#ff7a2f" },
+  rain: { e: "🌧️", c: "#ffe14a" },
 };
+const isWeapon = (k: Power["k"]) => k === "missile" || k === "rain";
+const RAIN_DMG = 1 / 75; // 25 bullets = 1/3 health
+const MISSILE_DMG = 1 / 3;
 const SCAN_DUR = 1.2;
 const SCAN_MAX = 260;
 const scanR = (s: Scan) => (s.t / SCAN_DUR) * (s.maxR ?? SCAN_MAX);
@@ -133,6 +144,19 @@ export class Game {
   hearR = 220;
   scanCd = 0;
   mySpd = 220;
+  // hider weapons
+  weapon: "missile" | "rain" | null = null;
+  aiming = false;
+  aim = { x: 0, y: 0 };
+  lock = 0;
+  lockId: string | null = null;
+  ammo = 0;
+  fireHeld = false;
+  fireCd = 0;
+  missiles: { x: number; y: number; d0: number; tgt: string; dmg: boolean; lx: number; ly: number }[] = [];
+  bullets: { x: number; y: number; t: number; dmg: boolean }[] = [];
+  myHp = 1;
+  foeHp = 1;
   dashCd = 0;
   dashT = 0;
   decoyCd = 0;
@@ -401,6 +425,8 @@ export class Game {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
     this.foe = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
+    this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
+    this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
     this.scanCd = this.dashCd = this.dashT = this.decoyCd = this.portalCd = 0;
     this.powT = 6; this.alarmW = this.alarmA = 0; this.alarmT = 35; this.relocT = 45; this.shake = 0;
   }
@@ -422,7 +448,7 @@ export class Game {
 
   // ---------- actions ----------
   doScan() {
-    if (!this.running || this.paused || this.scanCd > 0) return;
+    if (!this.running || this.paused || this.aiming || this.scanCd > 0) return;
     this.scanCd = this.role === "s" ? 3 : 3.5;
     const maxR = this.role === "s" ? 360 : 260;
     this.scans.push({ x: this.me.x, y: this.me.y, t: 0, owner: "me", hit: false, maxR });
@@ -430,13 +456,13 @@ export class Game {
     if (this.mp) this.net?.send("scan", { x: this.me.x, y: this.me.y });
   }
   doDash() {
-    if (!this.running || this.paused || this.dashCd > 0) return;
+    if (!this.running || this.paused || this.aiming || this.dashCd > 0) return;
     this.dashCd = 4; this.dashT = 0.25;
     this.snd(300, 0.25, "square", 0.04, 900);
     this.burst(this.me.x, this.me.y, "#ffe14a", 10);
   }
   doDecoy() {
-    if (!this.running || this.paused || this.decoyCd > 0 || (this.mp && this.role === "s")) return;
+    if (!this.running || this.paused || this.aiming || this.decoyCd > 0 || (this.mp && this.role === "s")) return;
     this.decoyCd = 10;
     const tgt = this.freeTile(Math.random, this.me, 360);
     // match how fast the hider has actually been travelling (walls, joystick tilt, etc.)
@@ -446,6 +472,101 @@ export class Game {
     this.onToast("🪞 Decoy dropped");
     if (this.mp) this.net?.send("decoy", { x: this.me.x, y: this.me.y, tx: tgt.x, ty: tgt.y, s: ds });
   }
+  // ---------- hider weapons ----------
+  toggleAim() {
+    if (!this.running || this.paused || !this.weapon || this.role !== "h") return;
+    this.aiming = !this.aiming;
+    this.fireHeld = false; this.lock = 0; this.lockId = null;
+    if (this.aiming) { this.aim = { x: this.me.x, y: this.me.y }; this.snd(500, 0.15, "square", 0.04, 800); }
+  }
+  setFire(on: boolean) {
+    if (!this.running || this.paused || !this.aiming) return;
+    if (this.weapon === "missile") {
+      if (!on) return;
+      if (this.lock < 1 || !this.lockId) { this.onToast("🎯 Hold the circle on a hunter to lock on"); return; }
+      const tg = this.ent(this.lockId);
+      if (!tg) return;
+      this.missiles.push({ x: this.me.x, y: this.me.y, d0: Math.max(60, Math.hypot(tg.x - this.me.x, tg.y - this.me.y)), tgt: this.lockId, dmg: true, lx: this.me.x, ly: this.me.y });
+      if (this.mp) this.net?.send("mis", { x: Math.round(this.me.x), y: Math.round(this.me.y), t: this.lockId });
+      this.snd(160, 0.8, "sawtooth", 0.07, 900); this.vib([40]);
+      this.onToast("🚀 Missile away!");
+      this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null;
+    } else this.fireHeld = on;
+  }
+  // hunter entity by id ("f" = human hunter, "cN" = AI seeker N), on either client
+  ent(id: string): { x: number; y: number; r: number } | null {
+    if (id === "f") return this.role === "h" ? this.foe : this.me;
+    return this.seekers[Number(id.slice(1))] ?? null;
+  }
+  targets() {
+    const out: { id: string; x: number; y: number; r: number }[] = [];
+    if (this.role !== "h") return out;
+    this.seekers.forEach((s, i) => out.push({ id: "c" + i, x: s.x, y: s.y, r: s.r }));
+    if (this.mp && this.foe) out.push({ id: "f", x: this.foe.x, y: this.foe.y, r: this.foe.r });
+    return out;
+  }
+  hurt(id: string, amt: number, local: boolean) {
+    if (local && this.mp) this.net?.send("dmg", { id, a: amt });
+    const ko = (hp: number) => hp <= 0.001;
+    if (id === "f") {
+      if (this.role === "h") {
+        this.foeHp -= amt;
+        if (ko(this.foeHp)) { this.foeHp = 1; if (this.foe) { this.burst(this.foe.x, this.foe.y, "#ff7a2f", 40); this.foe.rev = 3; } this.onToast("💥 Hunter knocked out — stunned 4s!"); }
+      } else {
+        this.myHp -= amt; this.shake = Math.max(this.shake, amt > 0.1 ? 0.5 : 0.12);
+        if (ko(this.myHp)) { this.myHp = 1; this.frozenMe = 4; this.burst(this.me.x, this.me.y, "#ff7a2f", 40); this.onToast("💥 You were knocked out! Stunned 4s"); this.vib([200]); }
+      }
+      return;
+    }
+    const s = this.seekers[Number(id.slice(1))];
+    if (!s) return;
+    s.hp = (s.hp ?? 1) - amt;
+    if (ko(s.hp)) { s.hp = 1; s.frozen = 4; s.path = []; this.burst(s.x, s.y, "#ff7a2f", 40); this.onToast(this.role === "h" ? "💥 Hunter knocked out — stunned 4s!" : "💥 Your AI partner was knocked out!"); }
+  }
+  updateWeapons(dt: number) {
+    this.fireCd = Math.max(0, this.fireCd - dt);
+    if (this.aiming && this.weapon === "missile") {
+      let best: string | null = null, bd = 34;
+      for (const t of this.targets()) { const d = Math.hypot(t.x - this.aim.x, t.y - this.aim.y); if (d < bd + t.r) { bd = d; best = t.id; } }
+      if (best && best === this.lockId) {
+        const was = this.lock; this.lock = Math.min(1, this.lock + dt / 1.1);
+        if (was < 1 && this.lock >= 1) { this.snd(1400, 0.15, "square", 0.05, 1800); this.vib([20]); }
+      } else if (best) { this.lockId = best; this.lock = 0; }
+      else { this.lock = Math.max(0, this.lock - dt * 2.5); if (this.lock <= 0) this.lockId = null; }
+    }
+    if (this.aiming && this.weapon === "rain" && this.fireHeld && this.fireCd <= 0 && this.ammo > 0) {
+      this.fireCd = 1 / 12; this.ammo--;
+      const a = Math.random() * 7, r = Math.random() * 20;
+      const b = { x: this.aim.x + Math.cos(a) * r, y: this.aim.y + Math.sin(a) * r, t: 0.42, dmg: true };
+      this.bullets.push(b);
+      if (this.mp) this.net?.send("bul", { x: Math.round(b.x), y: Math.round(b.y) });
+      this.snd(900 + Math.random() * 300, 0.06, "square", 0.025, 400);
+      if (this.ammo <= 0) { this.weapon = null; this.aiming = false; this.fireHeld = false; this.onToast("🌧️ Out of bullets"); }
+    }
+    for (const m of [...this.missiles]) {
+      const tg = this.ent(m.tgt);
+      if (!tg) { this.missiles = this.missiles.filter((x) => x !== m); continue; }
+      m.lx = m.x; m.ly = m.y;
+      const dx = tg.x - m.x, dy = tg.y - m.y, l = Math.hypot(dx, dy), mv = 720 * dt;
+      if (Math.random() < 0.8) this.parts.push({ x: m.x, y: m.y - Math.sin(Math.min(1, 1 - l / m.d0) * Math.PI) * 70, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40, l: 0.45, c: Math.random() < 0.5 ? "#ffb347" : "#ff5a2f" });
+      if (l <= mv + tg.r) {
+        this.missiles = this.missiles.filter((x) => x !== m);
+        this.burst(tg.x, tg.y, "#ff7a2f", 36); this.burst(tg.x, tg.y, "#ffe14a", 18);
+        this.snd(90, 0.6, "sawtooth", 0.1, 30); this.shake = Math.max(this.shake, 0.3);
+        if (m.dmg) this.hurt(m.tgt, MISSILE_DMG, true);
+        continue;
+      }
+      m.x += (dx / l) * mv; m.y += (dy / l) * mv;
+    }
+    for (const b of [...this.bullets]) {
+      b.t -= dt;
+      if (b.t > 0) continue;
+      this.bullets = this.bullets.filter((x) => x !== b);
+      this.burst(b.x, b.y, "#ffe14a", 5);
+      if (b.dmg) for (const t of this.targets()) if (Math.hypot(t.x - b.x, t.y - b.y) < t.r + 14) this.hurt(t.id, RAIN_DMG, true);
+    }
+  }
+
   togglePause() { if (this.running) { this.paused = !this.paused; this.last = performance.now(); } }
 
   // ---------- network in ----------
@@ -468,6 +589,14 @@ export class Game {
       if (k === "freeze" && this.role === "s") { this.frozenMe = 3; for (const s of this.seekers) s.frozen = 3; this.onToast("❄️ The hider froze you!"); this.vib([80]); }
       if (k === "radar" && this.role === "h") { this.me.rev = 3; this.onToast("📡 The hunter pinged your location!"); this.vib([60, 40, 60]); }
       if (k === "track" && this.role === "h") this.onToast("👣 The hunter can see your footprints!");
+    } else if (ev === "dmg") {
+      this.hurt(String(p['id']), Number(p['a']) || 0, false);
+    } else if (ev === "mis") {
+      const tg = this.ent(String(p['t']));
+      const x = p['x'] as number, y = p['y'] as number;
+      if (tg) { this.missiles.push({ x, y, d0: Math.max(60, Math.hypot(tg.x - x, tg.y - y)), tgt: String(p['t']), dmg: false, lx: x, ly: y }); this.onToast("🚀 Incoming missile!"); this.snd(160, 0.8, "sawtooth", 0.06, 900); }
+    } else if (ev === "bul") {
+      this.bullets.push({ x: p['x'] as number, y: p['y'] as number, t: 0.42, dmg: false });
     } else if (ev === "decoy") {
       const st = { x: p['x'] as number, y: p['y'] as number };
       const tg = { x: (p['tx'] as number) ?? st.x, y: (p['ty'] as number) ?? st.y };
@@ -500,11 +629,16 @@ export class Game {
     if (il > 1) { ix /= il; iy /= il; }
     this.frozenMe = Math.max(0, this.frozenMe - dt);
     this.trackT = Math.max(0, this.trackT - dt);
+    if (this.aiming) {
+      this.aim.x = Math.min((N - 1) * T, Math.max(T, this.aim.x + ix * 620 * dt));
+      this.aim.y = Math.min((N - 1) * T, Math.max(T, this.aim.y + iy * 620 * dt));
+      ix = 0; iy = 0;
+    }
     if (this.frozenMe > 0) { ix = 0; iy = 0; }
     let sp = 310 * (me.spd > 0 ? 1.5 : 1);
     if (this.dashT > 0) sp *= 3;
     me.vx = ix * sp; me.vy = iy * sp;
-    me.moving = il > 0.15;
+    me.moving = il > 0.15 && !this.aiming && this.frozenMe <= 0;
     const oldX = me.x, oldY = me.y;
     const steps = Math.ceil((sp * dt) / 6) || 1;
     for (let i = 0; i < steps; i++) this.mv(me, (me.vx * dt) / steps, (me.vy * dt) / steps);
@@ -553,6 +687,7 @@ export class Game {
 
     this.decoy = this.stepDecoy(this.decoy, dt);
     this.foeDecoy = this.stepDecoy(this.foeDecoy, dt);
+    this.updateWeapons(dt);
 
     // cubes (hider only)
     if (this.role === "h") {
@@ -639,8 +774,11 @@ export class Game {
     if (this.powT <= 0) {
       this.powT = 8;
       const ks: Power["k"][] = this.mp || this.hunt ? ["spd", "cloak", "scan", "freeze", "radar", "track"] : ["spd", "cloak", "scan", "freeze"];
+      if (!this.hunt) ks.push("missile", "rain");
       const R = this.mp ? this.powR : Math.random;
-      const k = ks[Math.floor(R() * ks.length)] ?? "spd";
+      let k = ks[Math.floor(R() * ks.length)] ?? "spd";
+      // only one weapon power-up on the maze at a time
+      if (isWeapon(k) && this.pows.some((p) => isWeapon(p.k))) k = "spd";
       const t = this.freeTile(R);
       const id = ++this.powId;
       if (this.pows.length < (this.mp ? 4 : 3)) this.pows.push({ ...t, k, id });
@@ -667,6 +805,12 @@ export class Game {
         if (p.k === "radar") {
           if (hider) { this.scanCd = 0; me.spd = 3; this.onToast("📡 Radar jammed — scan + speed!"); }
           else { if (this.foe) this.foe.rev = 3; for (const h of this.hiders) h.rev = 3; this.onToast("📡 Radar ping — hider revealed!"); }
+        }
+        if (isWeapon(p.k)) {
+          if (hider) {
+            this.weapon = p.k as "missile" | "rain"; this.ammo = 25; this.aiming = false;
+            this.onToast(p.k === "missile" ? "🚀 Missile lock! Tap MISSILE to aim" : "🌧️ Bullet rain! Tap RAIN to aim");
+          } else { this.scanCd = 0; this.onToast("🔄 Weapon disarmed — scan recharged"); }
         }
         if (p.k === "track") {
           if (hider) { this.decoyCd = 0; this.onToast("👣 Decoy recharged"); }
@@ -779,7 +923,8 @@ export class Game {
   foeVisible() {
     const f = this.foe;
     if (!f || !f.seen) return false;
-    const d = Math.hypot(f.x - this.me.x, f.y - this.me.y);
+    const v = this.aiming ? this.aim : this.me;
+    const d = Math.hypot(f.x - v.x, f.y - v.y);
     if (this.role === "h") return d < 340;
     return f.rev > 0 && !this.foeCloak;
   }
@@ -830,6 +975,7 @@ export class Game {
       seen: this.me.rev > 0, timeLeft: this.mp || this.hunt ? Math.max(0, this.timeLeft) : null,
       alarm: this.alarmA > 0 ? "🚨 ALARM — you are tracked!" : this.alarmW > 0 ? `🚨 Alarm in ${Math.ceil(this.alarmW)}s` : "",
       role: this.role, mp: this.mp, hunt: this.hunt,
+      weapon: this.weapon, aiming: this.aiming, lock: this.lock, ammo: this.ammo, hp: this.myHp,
       seekers: this.seekers.map((s) => (s.frozen > 0 ? "❄️" : s.target ? "🔴" : "⚪")).join(" "),
     });
   }
@@ -846,7 +992,8 @@ export class Game {
     c.fillStyle = "#05060e"; c.fillRect(0, 0, W, H);
     const sx = this.shake > 0 ? (Math.random() - 0.5) * this.shake * 24 : 0;
     const sy = this.shake > 0 ? (Math.random() - 0.5) * this.shake * 24 : 0;
-    const ox = W / 2 - me.x * z + sx, oy = H / 2 - me.y * z + sy;
+    const cam = this.aiming ? this.aim : me;
+    const ox = W / 2 - cam.x * z + sx, oy = H / 2 - cam.y * z + sy;
     c.setTransform(z * dpr, 0, 0, z * dpr, ox * dpr, oy * dpr);
 
     // visible tile range
@@ -1029,6 +1176,65 @@ export class Game {
     else this.ball(me.x, me.y, me.r, "#4f83ff", "#bcd4ff");
     c.globalAlpha = 1;
     if (me.rev > 0) { c.strokeStyle = "rgba(255,80,100,.8)"; c.lineWidth = 2; c.beginPath(); c.arc(me.x, me.y, me.r + 9 + 3 * Math.sin(now / 120), 0, 7); c.stroke(); }
+
+    // hunter health bars
+    const bar = (x: number, y: number, r: number, hp: number) => {
+      const w = 28, h = 5, bx = x - w / 2, by = y - r - 12;
+      c.fillStyle = "rgba(0,0,0,.65)"; c.fillRect(bx - 1, by - 1, w + 2, h + 2);
+      c.fillStyle = hp > 0.67 ? "#3dff8a" : hp > 0.34 ? "#ffd84a" : "#ff3b4e";
+      c.fillRect(bx, by, w * Math.max(0, hp), h);
+      c.fillStyle = "rgba(0,0,0,.7)"; c.fillRect(bx + w / 3, by, 1, h); c.fillRect(bx + (2 * w) / 3, by, 1, h);
+    };
+    for (const s of this.seekers) bar(s.x, s.y, s.r, s.hp ?? 1);
+    if (this.mp && this.foe && this.role === "h" && this.foeVisible()) bar(this.foe.x, this.foe.y, this.foe.r, this.foeHp);
+    if (this.mp && this.role === "s") bar(me.x, me.y, me.r, this.myHp);
+
+    // falling bullets
+    for (const b of this.bullets) {
+      const k = Math.max(0, b.t / 0.42), lift = k * k * 320;
+      c.fillStyle = `rgba(255,225,74,${0.25 * (1 - k)})`; c.beginPath(); c.arc(b.x, b.y, 3 + (1 - k) * 4, 0, 7); c.fill();
+      c.save(); c.strokeStyle = "#fff6b0"; c.shadowColor = "#ffe14a"; c.shadowBlur = 10; c.lineWidth = 2.5;
+      c.beginPath(); c.moveTo(b.x + lift * 0.18, b.y - lift - 22); c.lineTo(b.x + lift * 0.18 - 3, b.y - lift); c.stroke(); c.restore();
+    }
+    // missiles
+    for (const m of this.missiles) {
+      const tg = this.ent(m.tgt);
+      const l = tg ? Math.hypot(tg.x - m.x, tg.y - m.y) : 0, pr = Math.min(1, Math.max(0, 1 - l / m.d0));
+      const lift = Math.sin(pr * Math.PI) * 70;
+      const ang = Math.atan2(m.y - m.ly - (pr < 0.5 ? 1 : -1) * 2, m.x - m.lx);
+      c.fillStyle = "rgba(0,0,0,.35)"; c.beginPath(); c.ellipse(m.x, m.y, 8, 4, 0, 0, 7); c.fill();
+      c.save(); c.translate(m.x, m.y - lift); c.rotate(ang);
+      c.shadowColor = "#ff7a2f"; c.shadowBlur = 16;
+      c.fillStyle = "#ffb347"; c.beginPath(); c.moveTo(-10, 0); c.lineTo(-20 - Math.random() * 8, -4); c.lineTo(-20 - Math.random() * 8, 4); c.closePath(); c.fill();
+      c.fillStyle = "#e8ecff"; c.beginPath(); c.moveTo(12, 0); c.lineTo(-10, -5); c.lineTo(-10, 5); c.closePath(); c.fill();
+      c.fillStyle = "#ff3b4e"; c.fillRect(-10, -7, 5, 14);
+      c.restore();
+      if (this.role === "s" && m.tgt === "f") { c.strokeStyle = `rgba(255,59,78,${0.5 + 0.5 * Math.sin(now / 60)})`; c.lineWidth = 2; c.beginPath(); c.arc(me.x, me.y, me.r + 14, 0, 7); c.stroke(); }
+    }
+    // aim reticle
+    if (this.aiming) {
+      const a = this.aim;
+      c.save(); c.setLineDash([4, 6]); c.strokeStyle = "rgba(255,255,255,.25)"; c.lineWidth = 1.5;
+      c.beginPath(); c.moveTo(me.x, me.y); c.lineTo(a.x, a.y); c.stroke(); c.restore();
+      c.save(); c.shadowBlur = 10;
+      if (this.weapon === "missile") {
+        const locked = this.lock >= 1, col = locked ? "#3dff8a" : "#ffffff";
+        c.shadowColor = col; c.strokeStyle = col; c.lineWidth = 2.5;
+        c.beginPath(); c.arc(a.x, a.y, 14, 0, 7); c.stroke();
+        if (this.lock > 0) {
+          c.strokeStyle = locked ? "#3dff8a" : "#ffd84a"; c.lineWidth = 3.5;
+          c.beginPath(); c.arc(a.x, a.y, 21, -Math.PI / 2, -Math.PI / 2 + this.lock * Math.PI * 2); c.stroke();
+        }
+        c.fillStyle = col; c.beginPath(); c.arc(a.x, a.y, 2, 0, 7); c.fill();
+      } else {
+        c.shadowColor = "#ffe14a"; c.strokeStyle = "#ffe14a"; c.lineWidth = 2.5;
+        c.beginPath();
+        c.moveTo(a.x - 20, a.y); c.lineTo(a.x - 6, a.y); c.moveTo(a.x + 6, a.y); c.lineTo(a.x + 20, a.y);
+        c.moveTo(a.x, a.y - 20); c.lineTo(a.x, a.y - 6); c.moveTo(a.x, a.y + 6); c.lineTo(a.x, a.y + 20);
+        c.stroke(); c.lineWidth = 1.5; c.beginPath(); c.arc(a.x, a.y, 13, 0, 7); c.stroke();
+      }
+      c.restore();
+    }
 
     // danger vignette
     c.setTransform(dpr, 0, 0, dpr, 0, 0);

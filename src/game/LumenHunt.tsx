@@ -141,7 +141,7 @@ export default function LumenHunt() {
       if (host) return;
       beginMatch(payload.seed, payload.hr === "h" ? "s" : "h", !!payload.co);
     });
-    for (const ev of ["st", "scan", "spot", "decoy", "pow"]) {
+    for (const ev of ["st", "scan", "spot", "decoy", "pow", "dmg", "mis", "bul"]) {
       ch.on("broadcast", { event: ev }, ({ payload }) => gameRef.current?.netIn(ev, payload));
     }
     ch.on("broadcast", { event: "end" }, ({ payload }) => gameRef.current?.remoteEnd(payload.w, payload.text));
@@ -221,6 +221,14 @@ export default function LumenHunt() {
           {hud?.mp || hud?.hunt ? `You: ${hud.role === "h" ? "HIDER" : "HUNTER"}` : hud?.seekers}
         </div>
       </div>
+      {playing && hud?.mp && hud.role === "s" && (
+        <div className="pointer-events-none absolute left-1/2 top-12 flex -translate-x-1/2 items-center gap-2 text-xs font-bold">
+          ❤️
+          <div className="h-2.5 w-32 overflow-hidden rounded-full border border-ink/30 bg-void-glass">
+            <div className={`h-full transition-all ${hud.hp > 0.67 ? "bg-neon-blue" : hud.hp > 0.34 ? "bg-neon-yellow" : "bg-neon-red"}`} style={{ width: `${Math.max(0, hud.hp) * 100}%` }} />
+          </div>
+        </div>
+      )}
       {playing && hud?.alarm && (
         <div className="pointer-events-none absolute left-1/2 top-14 -translate-x-1/2 rounded-full border border-neon-red bg-void-glass px-4 py-1.5 text-sm font-bold">{hud.alarm}</div>
       )}
@@ -254,7 +262,41 @@ export default function LumenHunt() {
             />
           </div>
 
+          {/* weapon aiming */}
+          {hud?.aiming && (
+            <>
+              <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-neon-yellow/60 bg-void-glass px-4 py-1.5 text-sm font-bold">
+                {hud.weapon === "missile" ? (hud.lock >= 1 ? "🟢 LOCKED — FIRE!" : "🎯 Hold the circle on a hunter") : `🌧️ ${hud.ammo} bullets — hold FIRE`}
+              </div>
+              <button
+                onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture?.(e.pointerId); g?.setFire(true); }}
+                onPointerUp={() => g?.setFire(false)}
+                onPointerCancel={() => g?.setFire(false)}
+                className="absolute bottom-9 right-6 flex h-24 w-24 items-center justify-center rounded-full bg-neon-red text-base font-extrabold text-ink shadow-[0_0_24px_var(--neon-red)]"
+                style={{ opacity: hud.weapon === "missile" && hud.lock < 1 ? 0.5 : 1 }}
+              >
+                FIRE
+              </button>
+              <button
+                onPointerDown={(e) => { e.preventDefault(); g?.toggleAim(); }}
+                className="absolute bottom-40 right-8 flex h-12 w-12 items-center justify-center rounded-full border border-ink/30 bg-void-glass text-sm font-extrabold"
+                aria-label="Cancel aiming"
+              >✕</button>
+            </>
+          )}
+
+          {!hud?.aiming && hud?.weapon && (
+            <button
+              onPointerDown={(e) => { e.preventDefault(); g?.toggleAim(); }}
+              className="absolute bottom-60 right-8 flex h-16 w-16 flex-col items-center justify-center rounded-full bg-neon-red text-[10px] font-extrabold text-ink shadow-[0_0_20px_var(--neon-red)]"
+            >
+              <span className="text-lg">{hud.weapon === "missile" ? "🚀" : "🌧️"}</span>
+              {hud.weapon === "missile" ? "MISSILE" : "RAIN"}
+            </button>
+          )}
+
           {/* action buttons */}
+          {!hud?.aiming && (<>
           <button
             onPointerDown={(e) => { e.preventDefault(); g?.doScan(); }}
             className="absolute bottom-9 right-6 flex h-24 w-24 items-center justify-center rounded-full bg-neon-blue text-sm font-extrabold text-ink shadow-[0_0_24px_var(--neon-blue)]"
@@ -278,6 +320,7 @@ export default function LumenHunt() {
               {hud.decoyCd > 0 ? Math.ceil(hud.decoyCd) : "DECOY"}
             </button>
           )}
+          </>)}
 
           {paused && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-void/85">
