@@ -295,6 +295,22 @@ export default function LumenHunt() {
             </button>
           )}
 
+          {/* scout drones */}
+          {hud && hud.drones > 0 && hud.droneLock > 0 && (
+            <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-neon-red/60 bg-void-glass px-4 py-1.5 text-sm font-bold">
+              {hud.role === "h" ? `🛸 Drone lock ${Math.round(hud.droneLock * 100)}% — DASH to break it!` : `🛸 Drones locking on ${Math.round(hud.droneLock * 100)}%`}
+            </div>
+          )}
+          {hud?.role === "h" && hud.ropeAvail && !hud.aiming && (
+            <button
+              onPointerDown={(e) => { e.preventDefault(); g?.doRope(); }}
+              className="absolute bottom-60 right-28 flex h-16 w-16 flex-col items-center justify-center rounded-full bg-neon-yellow text-[10px] font-extrabold text-void shadow-[0_0_20px_var(--neon-yellow)] animate-pulse"
+            >
+              <span className="text-lg">🪢</span>ROPE
+            </button>
+          )}
+          {hud?.role === "h" && hud.roped && <SwipeBar pull={hud.pull} onSwipe={() => g?.swipeRope()} />}
+
           {/* action buttons */}
           {!hud?.aiming && (<>
           <button
@@ -471,6 +487,32 @@ function RoleToggle({ role, setRole, companion, setCompanion }: { role: Role; se
         </span>
       </button>
     )}
+    </div>
+  );
+}
+
+function SwipeBar({ pull, onSwipe }: { pull: number; onSwipe: () => void }) {
+  const st = useRef<{ x: number; dir: number } | null>(null);
+  const [off, setOff] = useState(0);
+  return (
+    <div className="absolute bottom-40 left-1/2 w-[min(70vw,360px)] -translate-x-1/2">
+      <div className="mb-1 text-center text-xs font-bold">🪢 Swipe ⟷ to pull the drone down · {pull}/3</div>
+      <div
+        className="relative h-14 touch-none overflow-hidden rounded-full border-2 border-neon-yellow bg-void-glass"
+        onPointerDown={(e) => { (e.target as HTMLElement).setPointerCapture?.(e.pointerId); st.current = { x: e.clientX, dir: 0 }; }}
+        onPointerMove={(e) => {
+          const s = st.current; if (!s) return;
+          const dx = e.clientX - s.x;
+          setOff(Math.max(-60, Math.min(60, dx)));
+          const dir = Math.sign(dx);
+          if (Math.abs(dx) > 55 && dir !== s.dir) { onSwipe(); st.current = { x: e.clientX, dir }; }
+        }}
+        onPointerUp={() => { st.current = null; setOff(0); }}
+        onPointerCancel={() => { st.current = null; setOff(0); }}
+      >
+        <div className="absolute inset-y-0 left-0 bg-neon-yellow/30 transition-all" style={{ width: `${(pull / 3) * 100}%` }} />
+        <div className="pointer-events-none absolute left-1/2 top-1/2 flex h-10 w-16 items-center justify-center rounded-full bg-neon-yellow text-sm font-extrabold text-void" style={{ transform: `translate(calc(-50% + ${off}px), -50%)` }}>⟷</div>
+      </div>
     </div>
   );
 }

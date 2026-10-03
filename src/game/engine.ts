@@ -24,6 +24,11 @@ export type Hud = {
   lock: number;
   ammo: number;
   hp: number;
+  droneLock: number;
+  drones: number;
+  ropeAvail: boolean;
+  roped: boolean;
+  pull: number;
 };
 export type EndInfo = { win: boolean; text: string; nextLevel?: boolean };
 
@@ -45,7 +50,7 @@ type Seeker = Ent & {
 };
 type Cube = { x: number; y: number; real: boolean; vis: number };
 type Scan = { x: number; y: number; t: number; owner: "me" | "foe" | "ai"; hit: boolean; maxR?: number };
-type Power = { x: number; y: number; k: "spd" | "cloak" | "scan" | "freeze" | "radar" | "track" | "missile" | "rain"; id?: number };
+type Power = { x: number; y: number; k: "spd" | "cloak" | "scan" | "freeze" | "radar" | "track" | "missile" | "rain" | "drone"; id?: number };
 type Portal = { a: { x: number; y: number }; b: { x: number; y: number }; c: string };
 
 const POW: Record<Power["k"], { e: string; c: string }> = {
@@ -57,7 +62,9 @@ const POW: Record<Power["k"], { e: string; c: string }> = {
   track: { e: "👣", c: "#ffa24a" },
   missile: { e: "🚀", c: "#ff7a2f" },
   rain: { e: "🌧️", c: "#ffe14a" },
+  drone: { e: "🛸", c: "#ff4fd8" },
 };
+type Drone = { x: number; y: number; vx: number; vy: number; side: number; ph: number; orb: number; alt: number; pull: number; dead: boolean; sx: number; sy: number; st: number };
 const isWeapon = (k: Power["k"]) => k === "missile" || k === "rain";
 const RAIN_DMG = 1 / 75; // 25 bullets = 1/3 health
 const MISSILE_DMG = 1 / 3;
@@ -157,6 +164,14 @@ export class Game {
   bullets: { x: number; y: number; t: number; dmg: boolean }[] = [];
   myHp = 1;
   foeHp = 1;
+  // hunter scout drones (simulated on the hider's device)
+  drones: Drone[] = [];
+  droneLock = 0;
+  droneLost = 0;
+  droneLife = 0;
+  rope: { d: Drone; t: number; att: boolean } | null = null;
+  droneView: { x: number; y: number; a: number }[] = [];
+  droneLockView = 0;
   dashCd = 0;
   dashT = 0;
   decoyCd = 0;
@@ -427,6 +442,7 @@ export class Game {
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
+    this.drones = []; this.droneLock = 0; this.droneLost = 0; this.rope = null; this.droneView = []; this.droneLockView = 0;
     this.scanCd = this.dashCd = this.dashT = this.decoyCd = this.portalCd = 0;
     this.powT = 6; this.alarmW = this.alarmA = 0; this.alarmT = 35; this.relocT = 45; this.shake = 0;
   }
@@ -458,6 +474,11 @@ export class Game {
   doDash() {
     if (!this.running || this.paused || this.aiming || this.dashCd > 0) return;
     this.dashCd = 4; this.dashT = 0.25;
+    if (this.role === "h" && this.drones.length && this.droneLock > 0 && this.droneLock < 1) {
+      this.droneLock = 0; this.droneLost = 1.8;
+      for (const d of this.drones) { d.sx = this.me.x + (Math.random() - 0.5) * 420; d.sy = this.me.y + (Math.random() - 0.5) * 420; d.st = 1.8; }
+      this.onToast("💨 Dash! Drone lock broken");
+    }
     this.snd(300, 0.25, "square", 0.04, 900);
     this.burst(this.me.x, this.me.y, "#ffe14a", 10);
   }
@@ -471,6 +492,152 @@ export class Game {
     this.snd(700, 0.3, "triangle", 0.05, 350);
     this.onToast("🪞 Decoy dropped");
     if (this.mp) this.net?.send("decoy", { x: this.me.x, y: this.me.y, tx: tgt.x, ty: tgt.y, s: ds });
+  }
+  // ---------- scout drones ----------
+  spawnDrones(from: { x: number; y: number }) {
+    if (this.role !== "h") return;
+    this.drones = [-1, 1].map((side) => ({
+      x: from.x + side * 30, y: from.y, vx: 0, vy: 0, side, ph: Math.random() * 6, orb: Math.random() * 6, alt: 1,
+      pull: 0, dead: false, sx: this.me.x, sy: this.me.y, st: 0,
+    }));
+    this.droneLife = 24; this.droneLock = 0; this.droneLost = 0; this.rope = null;
+    this.onToast("🛸 Scout drones launched — they're hunting you!");
+    this.snd(500, 0.6, "sawtooth", 0.04, 1200); this.vib([40, 30, 40]);
+  }
+  nearDrone(maxD: number) {
+    let best: Drone | null = null, bd = maxD;
+    for (const d of this.drones) {
+      if (d.dead) continue;
+      const dd = Math.hypot(d.x - this.me.x, d.y - this.me.y);
+      if (dd < bd) { bd = dd; best = d; }
+    }
+    return best;
+  }
+  doRope() {
+    if (!this.running || this.paused || this.rope) return;
+    const d = this.nearDrone(120);
+    if (!d) return;
+    this.rope = { d, t: 0, att: false };
+    this.snd(600, 0.2, "triangle", 0.05, 300);
+  }
+  swipeRope() {
+    const r = this.rope;
+    if (!r || !r.att || !this.running) return;
+    const d = r.d;
+    d.pull++; d.alt = Math.max(0.2, 1 - d.pull * 0.27); d.vx = d.vy = 0;
+    this.shake = 0.18; this.vib(35); this.snd(180 + d.pull * 60, 0.15, "square", 0.05, 90);
+    this.burst(d.x, d.y - 26 * d.alt, "#ff4fd8", 6);
+    if (d.pull >= 3) { d.dead = true; this.rope = null; this.onToast("💥 Drone pulled down!"); }
+  }
+  updateDrones(dt: number) {
+    if (!this.drones.length) { this.droneLock = 0; return; }
+    const me = this.me;
+    this.droneLife -= dt;
+    this.droneLost = Math.max(0, this.droneLost - dt);
+    if (this.droneLife <= 0) {
+      for (const d of this.drones) this.burst(d.x, d.y, "#ff4fd8", 10);
+      this.drones = []; this.rope = null; this.droneLock = 0;
+      this.onToast("🛸 Drones ran out of power");
+      return;
+    }
+    const hidden = me.cloak > 0;
+    let detect = false;
+    for (const d of [...this.drones]) {
+      if (d.dead) {
+        d.alt -= dt * 1.6;
+        if (d.alt <= 0) {
+          this.burst(d.x, d.y, "#ff4fd8", 30); this.burst(d.x, d.y, "#ffb347", 16);
+          this.snd(90, 0.5, "sawtooth", 0.08, 40); this.shake = 0.3;
+          this.drones = this.drones.filter((x) => x !== d);
+        }
+        continue;
+      }
+      d.ph += dt;
+      const roped = this.rope?.d === d && this.rope.att;
+      const dist = Math.hypot(d.x - me.x, d.y - me.y);
+      if (roped) {
+        // tethered: struggles against the rope, slowly dragged toward the hider
+        d.vx += (me.x - d.x) * 0.8 * dt + Math.sin(d.ph * 9) * 40 * dt;
+        d.vy += (me.y - d.y) * 0.8 * dt + Math.cos(d.ph * 7) * 40 * dt;
+        d.vx *= 0.9; d.vy *= 0.9;
+        d.x += d.vx * dt; d.y += d.vy * dt;
+        continue;
+      }
+      let tx: number, ty: number, vmax = 250;
+      if (this.droneLost > 0 || hidden) {
+        // searching: sweep random points around where the hider might be
+        d.st -= dt;
+        if (d.st <= 0 || Math.hypot(d.sx - d.x, d.sy - d.y) < 30) {
+          d.st = 1.4 + Math.random();
+          const a = Math.random() * 7, rr = 120 + Math.random() * 260;
+          d.sx = me.x + Math.cos(a) * rr; d.sy = me.y + Math.sin(a) * rr;
+        }
+        tx = d.sx; ty = d.sy; vmax = 190;
+      } else if (dist > 260) {
+        // flank approach: each drone swings in from its own side
+        const a = Math.atan2(me.y - d.y, me.x - d.x) + d.side * Math.PI / 2;
+        const off = Math.min(220, dist * 0.45);
+        tx = me.x + Math.cos(a) * off + Math.sin(d.ph * 1.7) * 40;
+        ty = me.y + Math.sin(a) * off + Math.cos(d.ph * 1.3) * 40;
+        d.orb = Math.atan2(d.y - me.y, d.x - me.x);
+      } else {
+        // close: circle the hider from opposite sides, weaving in and out
+        d.orb += d.side * (0.9 + 0.4 * Math.sin(d.ph * 0.7)) * dt;
+        const rr = 95 + 45 * Math.sin(d.ph * 1.9 + d.side);
+        tx = me.x + Math.cos(d.orb) * rr; ty = me.y + Math.sin(d.orb) * rr;
+        vmax = 280;
+      }
+      const dx = tx - d.x, dy = ty - d.y, l = Math.hypot(dx, dy) || 1;
+      const wantX = (dx / l) * Math.min(vmax, l * 3), wantY = (dy / l) * Math.min(vmax, l * 3);
+      d.vx += (wantX - d.vx) * Math.min(1, dt * 3.2);
+      d.vy += (wantY - d.vy) * Math.min(1, dt * 3.2);
+      d.x = Math.min((N - 1) * T, Math.max(T, d.x + d.vx * dt));
+      d.y = Math.min((N - 1) * T, Math.max(T, d.y + d.vy * dt));
+      d.alt += (1 - d.alt) * dt * 0.5;
+      if (!hidden && this.droneLost <= 0 && dist < 280) detect = true;
+    }
+    if (detect) this.droneLock += dt / 3.2; else this.droneLock = Math.max(0, this.droneLock - dt * 0.6);
+    if (this.droneLock >= 1) {
+      this.droneLock = 0; this.droneLost = 3;
+      me.rev = 5; this.frozenMe = Math.max(this.frozenMe, 1.2); this.shake = 0.6;
+      this.burst(me.x, me.y, "#ff4fd8", 34); this.snd(120, 0.6, "sawtooth", 0.09, 60); this.vib([100, 50, 100]);
+      this.onToast("💥 Drone strike! You're revealed & stunned");
+      if (this.mp) this.net?.send("spot", {});
+    }
+    const r = this.rope;
+    if (r) {
+      const rd = Math.hypot(r.d.x - me.x, r.d.y - me.y);
+      if (r.d.dead || !this.drones.includes(r.d) || rd > 280) { this.rope = null; this.onToast("🪢 Rope snapped"); }
+      else if (!r.att) { r.t += dt * 4; if (r.t >= 1) { r.att = true; this.onToast("🪢 Hooked! Swipe the bar 3 times"); this.vib(40); } }
+    }
+  }
+  drawDrone(x: number, y: number, alt: number, now: number, hooked: boolean) {
+    const c = this.ctx, h = 26 * alt;
+    c.fillStyle = "rgba(0,0,0,.4)"; c.beginPath(); c.ellipse(x, y, 13, 5, 0, 0, 7); c.fill();
+    c.save(); c.translate(x, y - h);
+    c.shadowColor = "#ff4fd8"; c.shadowBlur = 14;
+    c.strokeStyle = "#c9c9d8"; c.lineWidth = 2.5;
+    c.beginPath(); c.moveTo(-11, -11); c.lineTo(11, 11); c.moveTo(11, -11); c.lineTo(-11, 11); c.stroke();
+    for (const [rx, ry] of [[-11, -11], [11, -11], [-11, 11], [11, 11]] as const) {
+      c.save(); c.translate(rx, ry); c.rotate(now / 30 * (rx * ry > 0 ? 1 : -1));
+      c.fillStyle = "rgba(255,79,216,.35)"; c.beginPath(); c.ellipse(0, 0, 8, 2.5, 0, 0, 7); c.fill(); c.restore();
+    }
+    c.fillStyle = hooked ? "#ffb347" : "#2a1036"; c.beginPath(); c.arc(0, 0, 7, 0, 7); c.fill();
+    c.fillStyle = Math.sin(now / 120) > 0 ? "#ff4fd8" : "#ff3b4e"; c.beginPath(); c.arc(0, 0, 3, 0, 7); c.fill();
+    c.restore();
+    // scan beam
+    c.strokeStyle = `rgba(255,79,216,${0.18 + 0.12 * Math.sin(now / 200)})`; c.lineWidth = 1.5;
+    c.beginPath(); c.arc(x, y, 30 + ((now / 8) % 50), 0, 7); c.stroke();
+  }
+  drawLockRing(x: number, y: number, lock: number, now: number) {
+    const c = this.ctx;
+    c.save(); c.shadowColor = "#ff4fd8"; c.shadowBlur = 12;
+    c.strokeStyle = "rgba(255,79,216,.35)"; c.lineWidth = 2;
+    c.beginPath(); c.arc(x, y, 26, 0, 7); c.stroke();
+    c.strokeStyle = lock > 0.75 ? `rgba(255,59,78,${0.7 + 0.3 * Math.sin(now / 50)})` : "#ff4fd8"; c.lineWidth = 4;
+    c.beginPath(); c.arc(x, y, 26, -Math.PI / 2, -Math.PI / 2 + lock * Math.PI * 2); c.stroke();
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + now / 400; c.beginPath(); c.moveTo(x + Math.cos(a) * 32, y + Math.sin(a) * 32); c.lineTo(x + Math.cos(a) * 40, y + Math.sin(a) * 40); c.stroke(); }
+    c.restore();
   }
   // ---------- hider weapons ----------
   toggleAim() {
@@ -576,6 +743,12 @@ export class Game {
       this.foe.tx = p['x'] as number; this.foe.ty = p['y'] as number;
       this.foe.moving = !!p['m']; this.foe.dash = !!p['d']; this.foe.seen = true; this.foeCloak = !!p['ck'];
       if (this.role === "s") this.score = (p['sc'] as number) ?? this.score;
+      if (this.role === "s") {
+        const dr = Array.isArray(p['dr']) ? (p['dr'] as unknown as number[]) : [];
+        this.droneView = [];
+        for (let i = 0; i + 2 < dr.length; i += 3) this.droneView.push({ x: dr[i]!, y: dr[i + 1]!, a: dr[i + 2]! / 100 });
+        this.droneLockView = typeof p['lk'] === "number" ? (p['lk'] as number) / 100 : 0;
+      }
       const cp = this.seekers[0];
       if (this.role === "h" && cp && typeof p['cx'] === "number") cp.target = { x: p['cx'] as number, y: p['cy'] as number };
     } else if (ev === "scan") {
@@ -589,6 +762,7 @@ export class Game {
       if (k === "freeze" && this.role === "s") { this.frozenMe = 3; for (const s of this.seekers) s.frozen = 3; this.onToast("❄️ The hider froze you!"); this.vib([80]); }
       if (k === "radar" && this.role === "h") { this.me.rev = 3; this.onToast("📡 The hunter pinged your location!"); this.vib([60, 40, 60]); }
       if (k === "track" && this.role === "h") this.onToast("👣 The hunter can see your footprints!");
+      if (k === "drone" && this.role === "h") this.spawnDrones(this.foe);
     } else if (ev === "dmg") {
       this.hurt(String(p['id']), Number(p['a']) || 0, false);
     } else if (ev === "mis") {
@@ -688,6 +862,7 @@ export class Game {
     this.decoy = this.stepDecoy(this.decoy, dt);
     this.foeDecoy = this.stepDecoy(this.foeDecoy, dt);
     this.updateWeapons(dt);
+    if (this.role === "h") this.updateDrones(dt);
 
     // cubes (hider only)
     if (this.role === "h") {
@@ -774,14 +949,21 @@ export class Game {
     if (this.powT <= 0) {
       this.powT = 8;
       const ks: Power["k"][] = this.mp || this.hunt ? ["spd", "cloak", "scan", "freeze", "radar", "track"] : ["spd", "cloak", "scan", "freeze"];
-      if (!this.hunt) ks.push("missile", "rain");
+      if (!this.hunt) ks.push("missile", "rain", "drone", "drone");
       const R = this.mp ? this.powR : Math.random;
       let k = ks[Math.floor(R() * ks.length)] ?? "spd";
       // only one weapon power-up on the maze at a time
       if (isWeapon(k) && this.pows.some((p) => isWeapon(p.k))) k = "spd";
+      if (k === "drone" && (this.drones.length || this.droneView.length || this.pows.some((p) => p.k === "drone"))) k = "scan";
       const t = this.freeTile(R);
       const id = ++this.powId;
       if (this.pows.length < (this.mp ? 4 : 3)) this.pows.push({ ...t, k, id });
+    }
+    // solo: AI hunters can grab scout drones
+    if (!this.mp && !this.hunt) for (const p of [...this.pows]) {
+      if (p.k !== "drone") continue;
+      const s = this.seekers.find((s) => Math.hypot(s.x - p.x, s.y - p.y) < 24);
+      if (s) { this.pows = this.pows.filter((x) => x !== p); this.burst(p.x, p.y, POW.drone.c); this.spawnDrones(s); }
     }
     for (const p of [...this.pows]) {
       if (Math.hypot(p.x - me.x, p.y - me.y) < 20) {
@@ -811,6 +993,10 @@ export class Game {
             this.weapon = p.k as "missile" | "rain"; this.ammo = 25; this.aiming = false;
             this.onToast(p.k === "missile" ? "🚀 Missile lock! Tap MISSILE to aim" : "🌧️ Bullet rain! Tap RAIN to aim");
           } else { this.scanCd = 0; this.onToast("🔄 Weapon disarmed — scan recharged"); }
+        }
+        if (p.k === "drone") {
+          if (hider) { this.scanCd = 0; this.decoyCd = 0; this.onToast("🛸 Drone parts scrapped — decoy recharged"); }
+          else { this.droneLockView = 0; this.droneView = [{ x: me.x, y: me.y, a: 1 }]; this.onToast("🛸 Scout drones launched at the hider!"); }
         }
         if (p.k === "track") {
           if (hider) { this.decoyCd = 0; this.onToast("👣 Decoy recharged"); }
@@ -901,7 +1087,7 @@ export class Game {
     if (this.sendT <= 0) {
       this.sendT = 1 / 15;
       const cp = this.role === "s" ? this.seekers[0] : undefined;
-      this.net?.send("st", { x: Math.round(me.x), y: Math.round(me.y), m: me.moving, d: this.dashT > 0, ck: me.cloak > 0, sc: this.score, ...(cp ? { cx: Math.round(cp.x), cy: Math.round(cp.y) } : {}) });
+      this.net?.send("st", { x: Math.round(me.x), y: Math.round(me.y), m: me.moving, d: this.dashT > 0, ck: me.cloak > 0, sc: this.score, ...(this.role === "h" ? { dr: this.drones.flatMap((d) => [Math.round(d.x), Math.round(d.y), Math.round(d.alt * 100)]), lk: Math.round(this.droneLock * 100) } : {}), ...(cp ? { cx: Math.round(cp.x), cy: Math.round(cp.y) } : {}) });
     }
     if (this.role === "h") {
       for (const s of this.seekers) {
@@ -976,6 +1162,10 @@ export class Game {
       alarm: this.alarmA > 0 ? "🚨 ALARM — you are tracked!" : this.alarmW > 0 ? `🚨 Alarm in ${Math.ceil(this.alarmW)}s` : "",
       role: this.role, mp: this.mp, hunt: this.hunt,
       weapon: this.weapon, aiming: this.aiming, lock: this.lock, ammo: this.ammo, hp: this.myHp,
+      droneLock: this.role === "h" ? this.droneLock : this.droneLockView,
+      drones: this.role === "h" ? this.drones.filter((d) => !d.dead).length : this.droneView.length,
+      ropeAvail: this.role === "h" && !this.rope && !!this.nearDrone(120),
+      roped: !!this.rope?.att, pull: this.rope?.d.pull ?? 0,
       seekers: this.seekers.map((s) => (s.frozen > 0 ? "❄️" : s.target ? "🔴" : "⚪")).join(" "),
     });
   }
@@ -1195,6 +1385,22 @@ export class Game {
       c.fillStyle = `rgba(255,225,74,${0.25 * (1 - k)})`; c.beginPath(); c.arc(b.x, b.y, 3 + (1 - k) * 4, 0, 7); c.fill();
       c.save(); c.strokeStyle = "#fff6b0"; c.shadowColor = "#ffe14a"; c.shadowBlur = 10; c.lineWidth = 2.5;
       c.beginPath(); c.moveTo(b.x + lift * 0.18, b.y - lift - 22); c.lineTo(b.x + lift * 0.18 - 3, b.y - lift); c.stroke(); c.restore();
+    }
+    // scout drones + rope + lock ring
+    if (this.role === "h") {
+      const r = this.rope;
+      if (r) {
+        const k = r.att ? 1 : r.t, dx = r.d.x, dy = r.d.y - 26 * r.d.alt;
+        const ex = me.x + (dx - me.x) * k, ey = me.y + (dy - me.y) * k;
+        const sag = r.att ? 18 + Math.sin(now / 90) * 4 : 6;
+        c.save(); c.strokeStyle = "#e8c98a"; c.lineWidth = 2.5; c.shadowColor = "#ffb347"; c.shadowBlur = 6;
+        c.beginPath(); c.moveTo(me.x, me.y); c.quadraticCurveTo((me.x + ex) / 2, (me.y + ey) / 2 + sag, ex, ey); c.stroke(); c.restore();
+      }
+      for (const d of this.drones) this.drawDrone(d.x, d.y, d.alt, now, r?.d === d);
+      if (this.droneLock > 0) this.drawLockRing(me.x, me.y, this.droneLock, now);
+    } else {
+      for (const d of this.droneView) this.drawDrone(d.x, d.y, d.a, now, false);
+      if (this.droneLockView > 0 && this.foe) this.drawLockRing(this.foe.x, this.foe.y, this.droneLockView, now);
     }
     // missiles
     for (const m of this.missiles) {
