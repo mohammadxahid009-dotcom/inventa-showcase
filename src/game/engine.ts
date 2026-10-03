@@ -176,7 +176,8 @@ export class Game {
   dashT = 0;
   decoyCd = 0;
   portalCd = 0;
-  powT = 6;
+  powT = 0;
+  powBurst = 3;
   alarmW = 0;
   alarmA = 0;
   alarmT = 35;
@@ -340,7 +341,7 @@ export class Game {
     }
     for (let i = 0; i < 2; i++) this.portals.push({ a: this.freeTile(), b: this.freeTile(), c: ["#4fe3ff", "#ff6bd6"][i] ?? "#4fe3ff" });
     this.timeLeft = Math.max(90, 150 - (level - 1) * 10);
-    this.powT = 4;
+    this.powT = 0; this.powBurst = 3;
     this.onToast("🔴 You are the HUNTER — catch both hiders before time runs out!");
     this.begin();
   }
@@ -425,7 +426,7 @@ export class Game {
     this.foe = { ...o, r: 12, vx: 0, vy: 0, tx: o.x, ty: o.y, moving: false, dash: false, rev: 0, seen: false };
     this.timeLeft = 180;
     for (let i = 0; i < 2; i++) this.portals.push({ a: this.freeTile(R), b: this.freeTile(R), c: ["#4fe3ff", "#ff6bd6"][i] ?? "#4fe3ff" });
-    this.powR = rng(seed ^ 0x5a5a5a); this.powId = 0; this.powT = 5;
+    this.powR = rng(seed ^ 0x5a5a5a); this.powId = 0; this.powT = 0; this.powBurst = 3;
     if (role === "h") this.spawnCubes();
     this.companion = companion;
     if (companion) {
@@ -444,7 +445,7 @@ export class Game {
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
     this.drones = []; this.droneLock = 0; this.droneLost = 0; this.rope = null; this.droneView = []; this.droneLockView = 0;
     this.scanCd = this.dashCd = this.dashT = this.decoyCd = this.portalCd = 0;
-    this.powT = 6; this.alarmW = this.alarmA = 0; this.alarmT = 35; this.relocT = 45; this.shake = 0;
+    this.powT = 0; this.powBurst = 3; this.alarmW = this.alarmA = 0; this.alarmT = 35; this.relocT = 45; this.shake = 0;
   }
 
   begin() {
@@ -947,7 +948,7 @@ export class Game {
     const me = this.me;
     this.powT -= dt;
     if (this.powT <= 0) {
-      this.powT = 8;
+      if (this.powBurst > 0) { this.powBurst--; this.powT = 0; } else this.powT = 3;
       const ks: Power["k"][] = this.mp || this.hunt ? ["spd", "cloak", "scan", "freeze", "radar", "track"] : ["spd", "cloak", "scan", "freeze"];
       if (!this.hunt) ks.push("missile", "rain", "drone", "drone");
       const R = this.mp ? this.powR : Math.random;
@@ -957,7 +958,7 @@ export class Game {
       if (k === "drone" && (this.drones.length || this.droneView.length || this.pows.some((p) => p.k === "drone"))) k = "scan";
       const t = this.freeTile(R);
       const id = ++this.powId;
-      if (this.pows.length < (this.mp ? 4 : 3)) this.pows.push({ ...t, k, id });
+      if (this.pows.length < (this.mp ? 6 : 5)) this.pows.push({ ...t, k, id });
     }
     // solo: AI hunters can grab scout drones
     if (!this.mp && !this.hunt) for (const p of [...this.pows]) {
