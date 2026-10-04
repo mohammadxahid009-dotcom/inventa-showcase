@@ -157,6 +157,7 @@ export class Game {
   weapon: "missile" | "rain" | "mini" | null = null;
   exit: { x: number; y: number } | null = null;
   coins: Uint8Array = new Uint8Array(N * N);
+  coinsSet = false;
   aiming = false;
   aim = { x: 0, y: 0 };
   lock = 0;
@@ -444,7 +445,7 @@ export class Game {
 
   resetCommon(start: { x: number; y: number }) {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
-    this.foe = null; this.exit = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
+    this.foe = null; this.exit = null; this.coinsSet = false; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
@@ -463,7 +464,8 @@ export class Game {
 
   spawnCubes() {
     this.cubes = [];
-    if (!this.exit || !this.coins.some((v) => v)) {
+    if (!this.exit || !this.coinsSet) {
+      this.coinsSet = true;
       if (!this.exit) this.exit = this.freeTile(Math.random, this.me, 400);
       this.coins = new Uint8Array(N * N);
       for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) if (!this.g[y]?.[x]) this.coins[y * N + x] = 1;
