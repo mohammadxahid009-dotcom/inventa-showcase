@@ -266,7 +266,7 @@ export default function LumenHunt() {
           {hud?.aiming && (
             <>
               <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-neon-yellow/60 bg-void-glass px-4 py-1.5 text-sm font-bold">
-                {hud.weapon === "missile" ? (hud.lock >= 1 ? "🟢 LOCKED — FIRE!" : "🎯 Hold the circle on a hunter") : `🌧️ ${hud.ammo} bullets — hold FIRE`}
+                {hud.weapon === "missile" ? (hud.lock >= 1 ? "🟢 LOCKED — FIRE!" : "🎯 Hold the circle on a hunter") : hud.weapon === "mini" ? "🚀🚀 Aim at a hunter — tap FIRE" : `🌧️ ${hud.ammo} bullets — hold FIRE`}
               </div>
               <button
                 onPointerDown={(e) => { e.preventDefault(); (e.target as HTMLElement).setPointerCapture?.(e.pointerId); g?.setFire(true); }}
@@ -290,8 +290,8 @@ export default function LumenHunt() {
               onPointerDown={(e) => { e.preventDefault(); g?.toggleAim(); }}
               className="absolute bottom-60 right-8 flex h-16 w-16 flex-col items-center justify-center rounded-full bg-neon-red text-[10px] font-extrabold text-ink shadow-[0_0_20px_var(--neon-red)]"
             >
-              <span className="text-lg">{hud.weapon === "missile" ? "🚀" : "🌧️"}</span>
-              {hud.weapon === "missile" ? "MISSILE" : "RAIN"}
+              <span className="text-lg">{hud.weapon === "missile" ? "🚀" : hud.weapon === "mini" ? "🚀🚀" : "🌧️"}</span>
+              {hud.weapon === "missile" ? "MISSILE" : hud.weapon === "mini" ? "MINI" : "RAIN"}
             </button>
           )}
 
@@ -397,7 +397,7 @@ export default function LumenHunt() {
                   </button>
                 ))}
               </div>
-              <p className="text-ink-dim">Find the real cubes, avoid the seekers.</p>
+              <p className="text-ink-dim">Find the real keys, reach the exit, avoid the seekers.</p>
 
               {tab === "solo" ? (
                 <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-5 backdrop-blur-xl">
@@ -419,7 +419,7 @@ export default function LumenHunt() {
                   <details className="max-w-xs text-left text-sm text-ink-dim">
                     <summary className="cursor-pointer text-center font-bold text-ink">How to play</summary>
                     <p className="mt-2 leading-relaxed">
-                      You are the blue hider. Cubes are invisible — SCAN to reveal them for 4s. Only one in each set is real; fakes are duds. Collect 5 real cubes to win.
+                      You are the blue hider. Keys are invisible — SCAN to reveal them for 4s. Only one in each set is real; fakes are duds. Collect 5 real keys, then reach the green EXIT box to escape.
                       Red seekers hunt you: they see you in line of sight and hear you move nearby (stand still to stay quiet). Their scan rings expose you for 5s.
                       Power-ups: ⚡ speed, 👻 cloak, 🔄 scan recharge, ❄️ freeze. DASH (Shift) is fast but noisy, DECOY (E) lures seekers, and 🌀 portals teleport you.
                       Alarms track you for 4s. Every win makes the next level harder. Controls: WASD/arrows, Space to scan.
