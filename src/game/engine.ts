@@ -1374,8 +1374,8 @@ export class Game {
     // coins (hider only), visible tiles
     if (this.role === "h") {
       c.fillStyle = "#ffc9a0"; c.shadowColor = "#ffb070"; c.shadowBlur = 6;
-      const vx0 = Math.max(0, Math.floor((cam.x - this.W / 2) / T) - 1), vx1 = Math.min(N - 1, Math.ceil((cam.x + this.W / 2) / T) + 1);
-      const vy0 = Math.max(0, Math.floor((cam.y - this.H / 2) / T) - 1), vy1 = Math.min(N - 1, Math.ceil((cam.y + this.H / 2) / T) + 1);
+      const vx0 = Math.max(0, Math.floor((cam.x - this.W / 2 / this.z) / T) - 1), vx1 = Math.min(N - 1, Math.ceil((cam.x + this.W / 2 / this.z) / T) + 1);
+      const vy0 = Math.max(0, Math.floor((cam.y - this.H / 2 / this.z) / T) - 1), vy1 = Math.min(N - 1, Math.ceil((cam.y + this.H / 2 / this.z) / T) + 1);
       for (let y = vy0; y <= vy1; y++) for (let x = vx0; x <= vx1; x++) if (this.coins[y * N + x]) { c.beginPath(); c.arc(x * T + T / 2, y * T + T / 2, 3, 0, 7); c.fill(); }
       c.shadowBlur = 0;
     }
