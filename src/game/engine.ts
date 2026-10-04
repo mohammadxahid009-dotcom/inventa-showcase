@@ -19,7 +19,7 @@ export type Hud = {
   mp: boolean;
   hunt: boolean;
   seekers: string;
-  weapon: "missile" | "rain" | null;
+  weapon: "missile" | "rain" | "mini" | null;
   aiming: boolean;
   lock: number;
   ammo: number;
@@ -50,7 +50,7 @@ type Seeker = Ent & {
 };
 type Cube = { x: number; y: number; real: boolean; vis: number };
 type Scan = { x: number; y: number; t: number; owner: "me" | "foe" | "ai"; hit: boolean; maxR?: number };
-type Power = { x: number; y: number; k: "spd" | "cloak" | "scan" | "freeze" | "radar" | "track" | "missile" | "rain" | "drone"; id?: number };
+type Power = { x: number; y: number; k: "spd" | "cloak" | "scan" | "freeze" | "radar" | "track" | "missile" | "rain" | "mini" | "drone"; id?: number };
 type Portal = { a: { x: number; y: number }; b: { x: number; y: number }; c: string };
 
 const POW: Record<Power["k"], { e: string; c: string }> = {
@@ -63,11 +63,13 @@ const POW: Record<Power["k"], { e: string; c: string }> = {
   missile: { e: "🚀", c: "#ff7a2f" },
   rain: { e: "🌧️", c: "#ffe14a" },
   drone: { e: "🛸", c: "#ff4fd8" },
+  mini: { e: "🚀🚀", c: "#ff4f6e" },
 };
 type Drone = { x: number; y: number; vx: number; vy: number; side: number; ph: number; orb: number; alt: number; pull: number; dead: boolean; sx: number; sy: number; st: number };
-const isWeapon = (k: Power["k"]) => k === "missile" || k === "rain";
+const isWeapon = (k: Power["k"]) => k === "missile" || k === "rain" || k === "mini";
 const RAIN_DMG = 1 / 75; // 25 bullets = 1/3 health
 const MISSILE_DMG = 1 / 3;
+const MINI_DMG = 1 / 12; // 4 mini missiles = 1/3 health
 const SCAN_DUR = 1.2;
 const SCAN_MAX = 260;
 const scanR = (s: Scan) => (s.t / SCAN_DUR) * (s.maxR ?? SCAN_MAX);
@@ -152,7 +154,8 @@ export class Game {
   scanCd = 0;
   mySpd = 220;
   // hider weapons
-  weapon: "missile" | "rain" | null = null;
+  weapon: "missile" | "rain" | "mini" | null = null;
+  exit: { x: number; y: number } | null = null;
   aiming = false;
   aim = { x: 0, y: 0 };
   lock = 0;
@@ -160,7 +163,7 @@ export class Game {
   ammo = 0;
   fireHeld = false;
   fireCd = 0;
-  missiles: { x: number; y: number; d0: number; tgt: string; dmg: boolean; lx: number; ly: number }[] = [];
+  missiles: { x: number; y: number; d0: number; tgt: string; dmg: boolean; lx: number; ly: number; sm?: boolean; dl?: number }[] = [];
   bullets: { x: number; y: number; t: number; dmg: boolean }[] = [];
   myHp = 1;
   foeHp = 1;
@@ -325,7 +328,7 @@ export class Game {
       this.portals.push({ a: this.freeTile(), b: this.freeTile(), c });
     }
     this.spawnCubes();
-    this.onToast(level > 1 ? `Level ${level} — the hunters are faster` : "Scan to reveal cubes. Only one is real!");
+    this.onToast(level > 1 ? `Level ${level} — the hunters are faster` : "Scan to reveal keys. Collect 5 real keys, then reach the exit!");
     this.begin();
   }
 
@@ -433,13 +436,13 @@ export class Game {
       const cs = ctr(N - 2, 1);
       this.seekers.push({ ...cs, r: 12, vx: 0, vy: 0, path: [], think: 0, scanCd: 5, frozen: 0, target: null, hue: "#ff8a3b", trail: [] });
     }
-    this.onToast(role === "h" ? (companion ? "🔵 You are the HIDER — watch out, the seeker brought an AI partner!" : "🔵 You are the HIDER — collect 5 cubes or survive 3:00") : (companion ? "🔴 You are the SEEKER — your AI partner hunts with you!" : "🔴 You are the SEEKER — catch the hider!"));
+    this.onToast(role === "h" ? (companion ? "🔵 You are the HIDER — watch out, the seeker brought an AI partner!" : "🔵 You are the HIDER — collect 5 keys and escape, or survive 3:00") : (companion ? "🔴 You are the SEEKER — your AI partner hunts with you!" : "🔴 You are the SEEKER — catch the hider!"));
     this.begin();
   }
 
   resetCommon(start: { x: number; y: number }) {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
-    this.foe = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
+    this.foe = null; this.exit = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
@@ -458,6 +461,8 @@ export class Game {
 
   spawnCubes() {
     this.cubes = [];
+    if (!this.exit) this.exit = this.freeTile(Math.random, this.me, 400);
+    if (this.score >= this.goal) return;
     const real = Math.floor(Math.random() * 4);
     for (let i = 0; i < 4; i++) this.cubes.push({ ...this.freeTile(Math.random, this.me, 200), real: i === real, vis: 0 });
     this.relocT = 45;
@@ -659,6 +664,19 @@ export class Game {
       this.snd(160, 0.8, "sawtooth", 0.07, 900); this.vib([40]);
       this.onToast("🚀 Missile away!");
       this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null;
+    } else if (this.weapon === "mini") {
+      if (!on) return;
+      let best: { id: string; x: number; y: number } | null = null, bd = 60;
+      for (const t of this.targets()) { const d = Math.hypot(t.x - this.aim.x, t.y - this.aim.y) - t.r; if (d < bd) { bd = d; best = t; } }
+      if (!best) { this.onToast("🎯 Put the aim on a hunter first"); return; }
+      for (let i = 0; i < 4; i++) {
+        const ox = this.me.x + (Math.random() - 0.5) * 16, oy = this.me.y + (Math.random() - 0.5) * 16;
+        this.missiles.push({ x: ox, y: oy, d0: Math.max(60, Math.hypot(best.x - ox, best.y - oy)), tgt: best.id, dmg: true, lx: ox, ly: oy, sm: true, dl: i * 0.15 });
+        if (this.mp) this.net?.send("mis", { x: Math.round(ox), y: Math.round(oy), t: best.id, s: 1, d: i * 0.15 });
+      }
+      this.snd(240, 0.5, "sawtooth", 0.06, 1200); this.vib([20, 20, 20, 20]);
+      this.onToast("🚀🚀 Mini missiles away!");
+      this.weapon = null; this.aiming = false;
     } else this.fireHeld = on;
   }
   // hunter entity by id ("f" = human hunter, "cN" = AI seeker N), on either client
@@ -714,14 +732,15 @@ export class Game {
     for (const m of [...this.missiles]) {
       const tg = this.ent(m.tgt);
       if (!tg) { this.missiles = this.missiles.filter((x) => x !== m); continue; }
+      if (m.dl && m.dl > 0) { m.dl -= dt; if (m.dl <= 0) this.snd(700, 0.15, "square", 0.03, 1400); continue; }
       m.lx = m.x; m.ly = m.y;
-      const dx = tg.x - m.x, dy = tg.y - m.y, l = Math.hypot(dx, dy), mv = 720 * dt;
+      const dx = tg.x - m.x, dy = tg.y - m.y, l = Math.hypot(dx, dy), mv = (m.sm ? 860 : 720) * dt;
       if (Math.random() < 0.8) this.parts.push({ x: m.x, y: m.y - Math.sin(Math.min(1, 1 - l / m.d0) * Math.PI) * 70, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 40, l: 0.45, c: Math.random() < 0.5 ? "#ffb347" : "#ff5a2f" });
       if (l <= mv + tg.r) {
         this.missiles = this.missiles.filter((x) => x !== m);
-        this.burst(tg.x, tg.y, "#ff7a2f", 36); this.burst(tg.x, tg.y, "#ffe14a", 18);
-        this.snd(90, 0.6, "sawtooth", 0.1, 30); this.shake = Math.max(this.shake, 0.3);
-        if (m.dmg) this.hurt(m.tgt, MISSILE_DMG, true);
+        this.burst(tg.x, tg.y, "#ff7a2f", m.sm ? 14 : 36); this.burst(tg.x, tg.y, "#ffe14a", m.sm ? 8 : 18);
+        this.snd(m.sm ? 140 : 90, m.sm ? 0.3 : 0.6, "sawtooth", m.sm ? 0.06 : 0.1, 30); this.shake = Math.max(this.shake, m.sm ? 0.15 : 0.3);
+        if (m.dmg) this.hurt(m.tgt, m.sm ? MINI_DMG : MISSILE_DMG, true);
         continue;
       }
       m.x += (dx / l) * mv; m.y += (dy / l) * mv;
@@ -769,7 +788,7 @@ export class Game {
     } else if (ev === "mis") {
       const tg = this.ent(String(p['t']));
       const x = p['x'] as number, y = p['y'] as number;
-      if (tg) { this.missiles.push({ x, y, d0: Math.max(60, Math.hypot(tg.x - x, tg.y - y)), tgt: String(p['t']), dmg: false, lx: x, ly: y }); this.onToast("🚀 Incoming missile!"); this.snd(160, 0.8, "sawtooth", 0.06, 900); }
+      if (tg) { this.missiles.push({ x, y, d0: Math.max(60, Math.hypot(tg.x - x, tg.y - y)), tgt: String(p['t']), dmg: false, lx: x, ly: y, sm: !!p['s'], dl: Number(p['d'] ?? 0) }); if (!p['d']) this.onToast(p['s'] ? "🚀🚀 Incoming mini missiles!" : "🚀 Incoming missile!"); this.snd(160, 0.8, "sawtooth", 0.06, 900); }
     } else if (ev === "bul") {
       this.bullets.push({ x: p['x'] as number, y: p['y'] as number, t: 0.42, dmg: false });
     } else if (ev === "decoy") {
@@ -865,7 +884,11 @@ export class Game {
     this.updateWeapons(dt);
     if (this.role === "h") this.updateDrones(dt);
 
-    // cubes (hider only)
+    // keys + exit (hider only)
+    if (this.role === "h" && this.exit && Math.hypot(this.exit.x - me.x, this.exit.y - me.y) < 22) {
+      if (this.score >= this.goal) return this.finish(true, this.mp ? "You escaped with all 5 keys!" : `Escaped! Level ${this.level} cleared!`);
+      if (this.portalCd <= 0) { this.onToast(`🔒 Exit locked — ${this.goal - this.score} more key${this.goal - this.score === 1 ? "" : "s"} needed`); this.portalCd = 1.5; }
+    }
     if (this.role === "h") {
       for (const c of this.cubes) c.vis = Math.max(0, c.vis - dt);
       for (const c of [...this.cubes]) {
@@ -873,14 +896,13 @@ export class Game {
           if (c.real) {
             this.score++; this.burst(c.x, c.y, "#ffc93c", 24);
             this.snd(660, 0.15, "triangle", 0.08, 1320); this.vib(30);
-            this.onToast(`✨ Real cube! ${this.score}/${this.goal}`);
-            if (this.score >= this.goal) return this.finish(true, this.mp ? "You collected all 5 cubes!" : `Level ${this.level} cleared!`);
-            this.spawnCubes();
+            if (this.score >= this.goal) { this.cubes = []; this.onToast("🔓 All 5 keys! Run to the green EXIT!"); this.vib([60, 40, 60]); }
+            else { this.onToast(`🗝️ Real key! ${this.score}/${this.goal}`); this.spawnCubes(); }
             for (const s of this.seekers) s.think = 0;
           } else {
             this.cubes = this.cubes.filter((x) => x !== c);
             this.burst(c.x, c.y, "#777", 10); this.snd(150, 0.2, "square", 0.04);
-            this.onToast("💨 Fake cube — a dud");
+            this.onToast("💨 Fake key — a dud");
           }
           break;
         }
@@ -894,7 +916,7 @@ export class Game {
     const me = this.me;
     // timers
     this.relocT -= dt;
-    if (this.relocT <= 0) { this.spawnCubes(); this.onToast("🔀 The cubes moved!"); this.alarmW = 3; }
+    if (this.relocT <= 0) { this.spawnCubes(); this.onToast("🔀 The keys moved!"); this.alarmW = 3; }
     this.alarmT -= dt;
     if (this.alarmT <= 0 && this.alarmW <= 0 && this.alarmA <= 0) { this.alarmW = 3; this.alarmT = 30 + Math.random() * 15; }
     if (this.alarmW > 0) { this.alarmW -= dt; if (this.alarmW <= 0) { this.alarmA = 4; this.snd(880, 0.6, "sawtooth", 0.06, 440); this.vib([60, 40, 60]); } }
@@ -950,11 +972,11 @@ export class Game {
     if (this.powT <= 0) {
       if (this.powBurst > 0) { this.powBurst--; this.powT = 0; } else this.powT = 3;
       const ks: Power["k"][] = this.mp || this.hunt ? ["spd", "cloak", "scan", "freeze", "radar", "track"] : ["spd", "cloak", "scan", "freeze"];
-      if (!this.hunt) ks.push("missile", "rain", "drone", "drone");
+      if (!this.hunt) ks.push("missile", "missile", "rain", "rain", "mini", "mini", "drone", "drone", "drone");
       const R = this.mp ? this.powR : Math.random;
       let k = ks[Math.floor(R() * ks.length)] ?? "spd";
       // only one weapon power-up on the maze at a time
-      if (isWeapon(k) && this.pows.some((p) => isWeapon(p.k))) k = "spd";
+      if (isWeapon(k) && this.pows.some((p) => isWeapon(p.k))) k = (["missile", "rain", "mini"] as const).find((w) => !this.pows.some((p) => p.k === w)) ?? "spd";
       if (k === "drone" && (this.drones.length || this.droneView.length || this.pows.some((p) => p.k === "drone"))) k = "scan";
       const t = this.freeTile(R);
       const id = ++this.powId;
@@ -991,8 +1013,8 @@ export class Game {
         }
         if (isWeapon(p.k)) {
           if (hider) {
-            this.weapon = p.k as "missile" | "rain"; this.ammo = 25; this.aiming = false;
-            this.onToast(p.k === "missile" ? "🚀 Missile lock! Tap MISSILE to aim" : "🌧️ Bullet rain! Tap RAIN to aim");
+            this.weapon = p.k as "missile" | "rain" | "mini"; this.ammo = 25; this.aiming = false;
+            this.onToast(p.k === "missile" ? "🚀 Missile lock! Tap MISSILE to aim" : p.k === "mini" ? "🚀🚀 Mini missiles! Tap MINI to aim" : "🌧️ Bullet rain! Tap RAIN to aim");
           } else { this.scanCd = 0; this.onToast("🔄 Weapon disarmed — scan recharged"); }
         }
         if (p.k === "drone") {
@@ -1318,9 +1340,20 @@ export class Game {
     for (const cb of this.cubes) {
       if (cb.vis <= 0) continue;
       c.save(); c.globalAlpha = Math.min(1, cb.vis / 0.6); c.translate(cb.x, cb.y); c.rotate(now / 700);
-      c.fillStyle = "rgba(255,201,60,0.3)"; c.fillRect(-14, -14, 28, 28);
-      c.fillStyle = "#ffc93c"; c.fillRect(-9, -9, 18, 18);
-      c.fillStyle = "#fff3b0"; c.fillRect(-5, -5, 10, 10);
+      c.rotate(-now / 700 + Math.sin(now / 300) * 0.3);
+      c.shadowColor = "#ffc93c"; c.shadowBlur = 16;
+      c.fillStyle = "rgba(255,201,60,0.25)"; c.beginPath(); c.arc(0, 0, 16, 0, 7); c.fill();
+      c.font = "22px system-ui"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("🗝️", 0, 1);
+      c.restore();
+    }
+    if (this.exit && this.role === "h") {
+      const ex = this.exit, open = this.score >= this.goal, col = open ? "#3dff8a" : "#2fd6a0";
+      const pu = 1 + 0.08 * Math.sin(now / (open ? 120 : 400));
+      c.save(); c.translate(ex.x, ex.y); c.shadowColor = col; c.shadowBlur = open ? 30 : 14;
+      c.fillStyle = col + "33"; c.fillRect(-20 * pu, -20 * pu, 40 * pu, 40 * pu);
+      c.strokeStyle = col; c.lineWidth = 3; c.strokeRect(-16, -16, 32, 32);
+      c.font = "bold 9px system-ui"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillStyle = "#e8fff3"; c.shadowBlur = 0;
+      c.fillText("EXIT", 0, -4); c.font = "11px system-ui"; c.fillText(open ? "🔓" : "🔒", 0, 8);
       c.restore();
     }
 
@@ -1405,12 +1438,13 @@ export class Game {
     }
     // missiles
     for (const m of this.missiles) {
+      if (m.dl && m.dl > 0) continue;
       const tg = this.ent(m.tgt);
       const l = tg ? Math.hypot(tg.x - m.x, tg.y - m.y) : 0, pr = Math.min(1, Math.max(0, 1 - l / m.d0));
       const lift = Math.sin(pr * Math.PI) * 70;
       const ang = Math.atan2(m.y - m.ly - (pr < 0.5 ? 1 : -1) * 2, m.x - m.lx);
       c.fillStyle = "rgba(0,0,0,.35)"; c.beginPath(); c.ellipse(m.x, m.y, 8, 4, 0, 0, 7); c.fill();
-      c.save(); c.translate(m.x, m.y - lift); c.rotate(ang);
+      c.save(); c.translate(m.x, m.y - lift); c.rotate(ang); if (m.sm) c.scale(0.55, 0.55);
       c.shadowColor = "#ff7a2f"; c.shadowBlur = 16;
       c.fillStyle = "#ffb347"; c.beginPath(); c.moveTo(-10, 0); c.lineTo(-20 - Math.random() * 8, -4); c.lineTo(-20 - Math.random() * 8, 4); c.closePath(); c.fill();
       c.fillStyle = "#e8ecff"; c.beginPath(); c.moveTo(12, 0); c.lineTo(-10, -5); c.lineTo(-10, 5); c.closePath(); c.fill();
@@ -1495,6 +1529,7 @@ export class Game {
     for (const p of this.portals) { dot(p.a.x, p.a.y, p.c, 2); dot(p.b.x, p.b.y, p.c, 2); }
     for (const p of this.pows) dot(p.x, p.y, POW[p.k].c, 2);
     for (const cb of this.cubes) if (cb.vis > 0) dot(cb.x, cb.y, "#ffc93c", 2.4);
+    if (this.exit && this.role === "h") dot(this.exit.x, this.exit.y, "#3dff8a", 3.5);
     for (const s of this.seekers) dot(s.x, s.y, s.hue);
     for (const h of this.hiders) if (this.hiderVisible(h)) dot(h.x, h.y, "#7fb0ff");
     if (this.mp && this.foe && this.foeVisible()) dot(this.foe.x, this.foe.y, this.role === "s" ? "#7fb0ff" : "#ff3b4e");
