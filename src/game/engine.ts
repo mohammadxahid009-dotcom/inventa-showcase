@@ -431,6 +431,7 @@ export class Game {
     this.timeLeft = 180;
     for (let i = 0; i < 2; i++) this.portals.push({ a: this.freeTile(R), b: this.freeTile(R), c: ["#4fe3ff", "#ff6bd6"][i] ?? "#4fe3ff" });
     this.powR = rng(seed ^ 0x5a5a5a); this.powId = 0; this.powT = 0; this.powBurst = 2;
+    this.exit = this.freeTile(R, hStart, 400);
     if (role === "h") this.spawnCubes();
     this.companion = companion;
     if (companion) {
@@ -462,8 +463,8 @@ export class Game {
 
   spawnCubes() {
     this.cubes = [];
-    if (!this.exit) {
-      this.exit = this.freeTile(Math.random, this.me, 400);
+    if (!this.exit || !this.coins.some((v) => v)) {
+      if (!this.exit) this.exit = this.freeTile(Math.random, this.me, 400);
       this.coins = new Uint8Array(N * N);
       for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) if (!this.g[y]?.[x]) this.coins[y * N + x] = 1;
     }
@@ -1360,7 +1361,7 @@ export class Game {
       c.font = "22px system-ui"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("🗝️", 0, 1);
       c.restore();
     }
-    if (this.exit && this.role === "h") {
+    if (this.exit) {
       const ex = this.exit, open = this.score >= this.goal, col = open ? "#3dff8a" : "#2fd6a0";
       const pu = 1 + 0.08 * Math.sin(now / (open ? 120 : 400));
       c.save(); c.translate(ex.x, ex.y); c.shadowColor = col; c.shadowBlur = open ? 30 : 14;
@@ -1551,7 +1552,7 @@ export class Game {
     for (const p of this.portals) { dot(p.a.x, p.a.y, p.c, 2); dot(p.b.x, p.b.y, p.c, 2); }
     for (const p of this.pows) dot(p.x, p.y, POW[p.k].c, 2);
     for (const cb of this.cubes) if (cb.vis > 0) dot(cb.x, cb.y, "#ffc93c", 2.4);
-    if (this.exit && this.role === "h") dot(this.exit.x, this.exit.y, "#3dff8a", 3.5);
+    if (this.exit) dot(this.exit.x, this.exit.y, "#3dff8a", 3.5);
     for (const s of this.seekers) dot(s.x, s.y, s.hue);
     for (const h of this.hiders) if (this.hiderVisible(h)) dot(h.x, h.y, "#7fb0ff");
     if (this.mp && this.foe && this.foeVisible()) dot(this.foe.x, this.foe.y, this.role === "s" ? "#7fb0ff" : "#ff3b4e");
