@@ -156,6 +156,7 @@ export class Game {
   // hider weapons
   weapon: "missile" | "rain" | "mini" | null = null;
   exit: { x: number; y: number } | null = null;
+  coins: Uint8Array = new Uint8Array(N * N);
   aiming = false;
   aim = { x: 0, y: 0 };
   lock = 0;
@@ -461,7 +462,11 @@ export class Game {
 
   spawnCubes() {
     this.cubes = [];
-    if (!this.exit) this.exit = this.freeTile(Math.random, this.me, 400);
+    if (!this.exit) {
+      this.exit = this.freeTile(Math.random, this.me, 400);
+      this.coins = new Uint8Array(N * N);
+      for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) if (!this.g[y]?.[x]) this.coins[y * N + x] = 1;
+    }
     if (this.score >= this.goal) return;
     const real = Math.floor(Math.random() * 4);
     for (let i = 0; i < 4; i++) this.cubes.push({ ...this.freeTile(Math.random, this.me, 200), real: i === real, vis: 0 });
@@ -530,10 +535,11 @@ export class Game {
     const r = this.rope;
     if (!r || !r.att || !this.running) return;
     const d = r.d;
-    d.pull++; d.alt = Math.max(0.2, 1 - d.pull * 0.27); d.vx = d.vy = 0;
+    d.pull++; d.vx = d.vy = 0;
     this.shake = 0.18; this.vib(35); this.snd(180 + d.pull * 60, 0.15, "square", 0.05, 90);
-    this.burst(d.x, d.y - 26 * d.alt, "#ff4fd8", 6);
-    if (d.pull >= 3) { d.dead = true; this.rope = null; this.onToast("💥 Drone pulled down!"); }
+    this.burst(d.x, d.y - 55 * d.alt, "#ff4fd8", 6);
+    if (d.pull >= 3) { d.alt = 0.15; d.dead = true; this.rope = null; this.onToast("💥 Drone slammed into the ground!"); }
+    else this.onToast(d.pull === 1 ? "🪢 It's dropping — keep swiping!" : "🪢 Almost down — one more!");
   }
   updateDrones(dt: number) {
     if (!this.drones.length) { this.droneLock = 0; return; }
@@ -562,6 +568,8 @@ export class Game {
       const roped = this.rope?.d === d && this.rope.att;
       const dist = Math.hypot(d.x - me.x, d.y - me.y);
       if (roped) {
+        const tgtAlt = 1 - d.pull * 0.36;
+        d.alt += (tgtAlt - d.alt) * Math.min(1, dt * 7);
         // tethered: struggles against the rope, slowly dragged toward the hider
         d.vx += (me.x - d.x) * 0.8 * dt + Math.sin(d.ph * 9) * 40 * dt;
         d.vy += (me.y - d.y) * 0.8 * dt + Math.cos(d.ph * 7) * 40 * dt;
@@ -618,8 +626,8 @@ export class Game {
     }
   }
   drawDrone(x: number, y: number, alt: number, now: number, hooked: boolean) {
-    const c = this.ctx, h = 26 * alt;
-    c.fillStyle = "rgba(0,0,0,.4)"; c.beginPath(); c.ellipse(x, y, 13, 5, 0, 0, 7); c.fill();
+    const c = this.ctx, h = 55 * alt;
+    c.fillStyle = `rgba(0,0,0,${0.65 - 0.35 * alt})`; c.beginPath(); c.ellipse(x, y, 9 + 6 * alt, 3.5 + 2 * alt, 0, 0, 7); c.fill();
     c.save(); c.translate(x, y - h);
     c.shadowColor = "#ff4fd8"; c.shadowBlur = 14;
     c.strokeStyle = "#c9c9d8"; c.lineWidth = 2.5;
@@ -890,6 +898,11 @@ export class Game {
       if (this.portalCd <= 0) { this.onToast(`🔒 Exit locked — ${this.goal - this.score} more key${this.goal - this.score === 1 ? "" : "s"} needed`); this.portalCd = 1.5; }
     }
     if (this.role === "h") {
+      const ci = Math.floor(me.y / T) * N + Math.floor(me.x / T);
+      if (this.coins[ci]) {
+        const cx = (ci % N) * T + T / 2, cy = Math.floor(ci / N) * T + T / 2;
+        if (Math.hypot(cx - me.x, cy - me.y) < 14) { this.coins[ci] = 0; this.snd(1200 + Math.random() * 200, 0.05, "square", 0.02, 1700); this.burst(cx, cy, "#ffd6a0", 3); }
+      }
       for (const c of this.cubes) c.vis = Math.max(0, c.vis - dt);
       for (const c of [...this.cubes]) {
         if (Math.hypot(c.x - me.x, c.y - me.y) < 20) {
@@ -972,12 +985,13 @@ export class Game {
     if (this.powT <= 0) {
       if (this.powBurst > 0) { this.powBurst--; this.powT = 0; } else this.powT = 3;
       const ks: Power["k"][] = this.mp || this.hunt ? ["spd", "cloak", "scan", "freeze", "radar", "track"] : ["spd", "cloak", "scan", "freeze"];
-      if (!this.hunt) ks.push("missile", "missile", "rain", "rain", "mini", "mini", "drone", "drone", "drone");
+      if (!this.hunt) ks.push("missile", "rain", "mini", "drone", "drone", "drone");
+      if (this.mp || this.hunt) ks.push("radar", "track", "freeze", "scan");
       const R = this.mp ? this.powR : Math.random;
       let k = ks[Math.floor(R() * ks.length)] ?? "spd";
       // only one weapon power-up on the maze at a time
       if (isWeapon(k) && this.pows.some((p) => isWeapon(p.k))) k = (["missile", "rain", "mini"] as const).find((w) => !this.pows.some((p) => p.k === w)) ?? "spd";
-      if (k === "drone" && (this.drones.length || this.droneView.length || this.pows.some((p) => p.k === "drone"))) k = "scan";
+      if (k === "drone" && (this.drones.length || this.droneView.length || this.pows.some((p) => p.k === "drone"))) k = "radar";
       const t = this.freeTile(R);
       const id = ++this.powId;
       if (this.pows.length < (this.mp ? 6 : 5)) this.pows.push({ ...t, k, id });
@@ -1357,6 +1371,14 @@ export class Game {
       c.restore();
     }
 
+    // coins (hider only), visible tiles
+    if (this.role === "h") {
+      c.fillStyle = "#ffc9a0"; c.shadowColor = "#ffb070"; c.shadowBlur = 6;
+      const vx0 = Math.max(0, Math.floor((cam.x - this.W / 2) / T) - 1), vx1 = Math.min(N - 1, Math.ceil((cam.x + this.W / 2) / T) + 1);
+      const vy0 = Math.max(0, Math.floor((cam.y - this.H / 2) / T) - 1), vy1 = Math.min(N - 1, Math.ceil((cam.y + this.H / 2) / T) + 1);
+      for (let y = vy0; y <= vy1; y++) for (let x = vx0; x <= vx1; x++) if (this.coins[y * N + x]) { c.beginPath(); c.arc(x * T + T / 2, y * T + T / 2, 3, 0, 7); c.fill(); }
+      c.shadowBlur = 0;
+    }
     // power-ups
     c.font = "16px system-ui"; c.textAlign = "center"; c.textBaseline = "middle";
     for (const p of this.pows) {
@@ -1424,7 +1446,7 @@ export class Game {
     if (this.role === "h") {
       const r = this.rope;
       if (r) {
-        const k = r.att ? 1 : r.t, dx = r.d.x, dy = r.d.y - 26 * r.d.alt;
+        const k = r.att ? 1 : r.t, dx = r.d.x, dy = r.d.y - 55 * r.d.alt;
         const ex = me.x + (dx - me.x) * k, ey = me.y + (dy - me.y) * k;
         const sag = r.att ? 18 + Math.sin(now / 90) * 4 : 6;
         c.save(); c.strokeStyle = "#e8c98a"; c.lineWidth = 2.5; c.shadowColor = "#ffb347"; c.shadowBlur = 6;
