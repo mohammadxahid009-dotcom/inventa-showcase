@@ -29,6 +29,8 @@ export type Hud = {
   ropeAvail: boolean;
   roped: boolean;
   pull: number;
+  shock: { on: boolean; ready: boolean; charge: number; genCd: number; near: boolean };
+  hiderHp: number;
 };
 export type EndInfo = { win: boolean; text: string; nextLevel?: boolean };
 
@@ -49,7 +51,7 @@ type Seeker = Ent & {
   hp?: number;
 };
 type Cube = { x: number; y: number; real: boolean; vis: number };
-type Scan = { x: number; y: number; t: number; owner: "me" | "foe" | "ai"; hit: boolean; maxR?: number };
+type Scan = { x: number; y: number; t: number; owner: "me" | "foe" | "ai"; hit: boolean; maxR?: number; shock?: boolean; hits?: object[] };
 type Power = { x: number; y: number; k: "spd" | "cloak" | "scan" | "freeze" | "radar" | "track" | "missile" | "rain" | "mini" | "drone"; id?: number };
 type Portal = { a: { x: number; y: number }; b: { x: number; y: number }; c: string };
 
@@ -158,6 +160,12 @@ export class Game {
   exit: { x: number; y: number } | null = null;
   coins: Uint8Array = new Uint8Array(N * N);
   coinsSet = false;
+  gen: { x: number; y: number } | null = null;
+  genCd = 0; shockCharge = 0; shockReady = false;
+  hiderHp = 1; foeHiderHp = 1;
+  hitStop = 0;
+  zap: { fx: number; fy: number; tx: number; ty: number; t: number } | null = null;
+  dark: { x: number; y: number; r: number; t: number } | null = null;
   aiming = false;
   aim = { x: 0, y: 0 };
   lock = 0;
@@ -345,6 +353,7 @@ export class Game {
       this.hiders.push({ ...p, r: 11, vx: 0, vy: 0, path: [], think: 0, scanCd: 0, frozen: 0, target: null, hue: ["#4f83ff", "#3bd1ff"][i] ?? "#4f83ff", trail: [], rev: 0, decoyCd: 6 + i * 3 });
     }
     for (let i = 0; i < 2; i++) this.portals.push({ a: this.freeTile(), b: this.freeTile(), c: ["#4fe3ff", "#ff6bd6"][i] ?? "#4fe3ff" });
+    this.gen = this.freeTile(Math.random, this.me, 300);
     this.timeLeft = Math.max(90, 150 - (level - 1) * 10);
     this.powT = 0; this.powBurst = 2;
     this.onToast("🔴 You are the HUNTER — catch both hiders before time runs out!");
@@ -355,8 +364,20 @@ export class Game {
     const me = this.me;
     this.updatePowers(dt);
     this.timeLeft -= dt;
-    for (const sc of this.scans) if (sc.owner === "me") for (const h of this.hiders)
-      if (Math.abs(Math.hypot(h.x - sc.x, h.y - sc.y) - scanR(sc)) < 16) h.rev = 5;
+    for (const sc of this.scans) if (sc.owner === "me") for (const h of [...this.hiders])
+      if (Math.abs(Math.hypot(h.x - sc.x, h.y - sc.y) - scanR(sc)) < 16) {
+        h.rev = 5;
+        if (sc.shock && sc.hits && !sc.hits.includes(h)) {
+          sc.hits.push(h);
+          this.triggerZap({ x: sc.x, y: sc.y }, h, scanR(sc));
+          h.hp = (h.hp ?? 1) - 0.2; h.frozen = Math.max(h.frozen, 1.2);
+          if (h.hp <= 0.001) {
+            this.hiders = this.hiders.filter((x) => x !== h); this.foeDecoy = null; this.score++;
+            if (!this.hiders.length) return this.finish(true, `Level ${this.level} cleared — you caught them all!`);
+            this.onToast("⚡ Hider electrocuted! One left…");
+          } else this.onToast("⚡ Direct hit! Hider -1/5 health");
+        }
+      }
     const sp = (1 + (this.level - 1) * 0.07) * this.diff;
     let nearest = Infinity;
     for (const h of [...this.hiders]) {
@@ -433,6 +454,7 @@ export class Game {
     for (let i = 0; i < 2; i++) this.portals.push({ a: this.freeTile(R), b: this.freeTile(R), c: ["#4fe3ff", "#ff6bd6"][i] ?? "#4fe3ff" });
     this.powR = rng(seed ^ 0x5a5a5a); this.powId = 0; this.powT = 0; this.powBurst = 2;
     this.exit = this.freeTile(R, hStart, 400);
+    this.gen = this.freeTile(R, sStart, 360);
     if (role === "h") this.spawnCubes();
     this.companion = companion;
     if (companion) {
@@ -445,7 +467,7 @@ export class Game {
 
   resetCommon(start: { x: number; y: number }) {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
-    this.foe = null; this.exit = null; this.coinsSet = false; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
+    this.foe = null; this.exit = null; this.coinsSet = false; this.gen = null; this.genCd = 0; this.shockCharge = 0; this.shockReady = false; this.hiderHp = 1; this.foeHiderHp = 1; this.hitStop = 0; this.zap = null; this.dark = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
@@ -484,6 +506,39 @@ export class Game {
     this.scans.push({ x: this.me.x, y: this.me.y, t: 0, owner: "me", hit: false, maxR });
     this.snd(520, 0.5, "sine", 0.05, 1400);
     if (this.mp) this.net?.send("scan", { x: this.me.x, y: this.me.y });
+  }
+  doShock() {
+    if (!this.running || this.paused || this.aiming || this.role !== "s" || !this.shockReady) return;
+    this.shockReady = false;
+    this.scans.push({ x: this.me.x, y: this.me.y, t: 0, owner: "me", hit: false, maxR: 380, shock: true, hits: [] });
+    this.snd(90, 0.6, "sawtooth", 0.07, 1800); this.snd(1400, 0.4, "square", 0.025, 300);
+    this.shake = 0.25; this.vib([30, 20, 30]);
+    this.burst(this.me.x, this.me.y, "#7fe6ff", 22);
+    this.onToast("⚡ SHOCK wave released!");
+    if (this.mp) this.net?.send("scan", { x: this.me.x, y: this.me.y, sh: 1 });
+  }
+  triggerZap(from: { x: number; y: number }, to: { x: number; y: number }, r: number) {
+    this.hitStop = 0.45;
+    this.zap = { fx: from.x, fy: from.y, tx: to.x, ty: to.y, t: 1.3 };
+    this.dark = { x: from.x, y: from.y, r: Math.max(r, Math.hypot(to.x - from.x, to.y - from.y) + 40), t: 1.6 };
+    this.shake = 0.6; this.vib([60, 30, 120]);
+    this.snd(60, 0.7, "sawtooth", 0.1, 30);
+    for (let i = 0; i < 5; i++) this.snd(800 + Math.random() * 2400, 0.06 + Math.random() * 0.1, "square", 0.03, 200 + Math.random() * 600);
+    this.burst(to.x, to.y, "#7fe6ff", 34); this.burst(to.x, to.y, "#ffffff", 14);
+  }
+  updateGen(dt: number) {
+    this.genCd = Math.max(0, this.genCd - dt);
+    if (this.role !== "s" || !this.gen || this.shockReady) return;
+    const near = Math.hypot(this.gen.x - this.me.x, this.gen.y - this.me.y) < 90;
+    if (near && this.genCd <= 0) {
+      this.shockCharge += dt / 6;
+      if (Math.random() < dt * 8) this.snd(1200 + Math.random() * 800, 0.04, "square", 0.012, 900);
+      if (this.shockCharge >= 1) {
+        this.shockCharge = 0; this.shockReady = true; this.genCd = 20;
+        this.snd(440, 0.4, "triangle", 0.07, 1320); this.vib([40, 30, 40]);
+        this.onToast("⚡ SHOCK ready! Hit the hider with it");
+      }
+    }
   }
   doDash() {
     if (!this.running || this.paused || this.aiming || this.dashCd > 0) return;
@@ -627,6 +682,94 @@ export class Game {
       if (r.d.dead || !this.drones.includes(r.d) || rd > 280) { this.rope = null; this.onToast("🪢 Rope snapped"); }
       else if (!r.att) { r.t += dt * 4; if (r.t >= 1) { r.att = true; this.onToast("🪢 Hooked! Swipe the bar 3 times"); this.vib(40); } }
     }
+  }
+  boltPts(x1: number, y1: number, x2: number, y2: number, disp: number) {
+    let pts: [number, number][] = [[x1, y1], [x2, y2]];
+    for (let it = 0; it < 6; it++) {
+      const nx: [number, number][] = [pts[0]!];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const [ax, ay] = pts[i]!, [bx, by] = pts[i + 1]!;
+        const l = Math.hypot(bx - ax, by - ay) || 1, o = (Math.random() - 0.5) * disp;
+        nx.push([(ax + bx) / 2 + (-(by - ay) / l) * o, (ay + by) / 2 + ((bx - ax) / l) * o], [bx, by]);
+      }
+      pts = nx; disp *= 0.55;
+    }
+    return pts;
+  }
+  strokeBolt(pts: [number, number][], w: number, a: number) {
+    const c = this.ctx;
+    c.beginPath(); c.moveTo(pts[0]![0], pts[0]![1]);
+    for (const [x, y] of pts) c.lineTo(x, y);
+    c.shadowColor = "#3fb8ff"; c.shadowBlur = 30;
+    c.strokeStyle = `rgba(60,150,255,${0.35 * a})`; c.lineWidth = w * 4; c.stroke();
+    c.shadowBlur = 16;
+    c.strokeStyle = `rgba(120,230,255,${0.9 * a})`; c.lineWidth = w * 1.6; c.stroke();
+    c.shadowBlur = 0;
+    c.strokeStyle = `rgba(255,255,255,${a})`; c.lineWidth = w * 0.6; c.stroke();
+  }
+  drawZap(z: { fx: number; fy: number; tx: number; ty: number; t: number }, now: number) {
+    const c = this.ctx, k = z.t / 1.3;
+    const flick = 0.55 + 0.45 * (Math.sin(now / 23) > -0.3 ? 1 : 0.2);
+    const a = Math.min(1, k * 2.2) * flick;
+    const len = Math.hypot(z.tx - z.fx, z.ty - z.fy);
+    // travel: bolt races from hunter to hider in the first 0.15s
+    const grow = Math.min(1, (1.3 - z.t) / 0.15);
+    const ex = z.fx + (z.tx - z.fx) * grow, ey = z.fy + (z.ty - z.fy) * grow;
+    c.save(); c.lineCap = "round"; c.lineJoin = "round"; c.globalCompositeOperation = "lighter";
+    const main = this.boltPts(z.fx, z.fy, ex, ey, Math.min(90, len * 0.35));
+    this.strokeBolt(main, 2.6, a);
+    this.strokeBolt(this.boltPts(z.fx, z.fy, ex, ey, Math.min(120, len * 0.45)), 1.1, a * 0.6);
+    // forks
+    for (let i = 0; i < 5; i++) {
+      const p = main[Math.floor(main.length * (0.15 + Math.random() * 0.75))];
+      if (!p) continue;
+      const ang = Math.atan2(ey - z.fy, ex - z.fx) + (Math.random() - 0.5) * 2.2, fl = 20 + Math.random() * 50;
+      this.strokeBolt(this.boltPts(p[0], p[1], p[0] + Math.cos(ang) * fl, p[1] + Math.sin(ang) * fl, fl * 0.5), 0.8, a * 0.8);
+    }
+    if (grow >= 1) {
+      // impact: crackling tendrils + shock rings around the hider
+      for (let i = 0; i < 6; i++) {
+        const ang = Math.random() * 7, fl = 14 + Math.random() * 26;
+        this.strokeBolt(this.boltPts(z.tx, z.ty, z.tx + Math.cos(ang) * fl, z.ty + Math.sin(ang) * fl, 12), 0.7, a);
+      }
+      const rp = 1 - k;
+      c.strokeStyle = `rgba(140,230,255,${(1 - rp) * 0.9})`; c.lineWidth = 3;
+      c.beginPath(); c.arc(z.tx, z.ty, 10 + rp * 60, 0, 7); c.stroke();
+      c.beginPath(); c.arc(z.tx, z.ty, 6 + rp * 30, 0, 7); c.stroke();
+      const g = c.createRadialGradient(z.tx, z.ty, 0, z.tx, z.ty, 46);
+      g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.3, `rgba(120,220,255,${a * 0.6})`); g.addColorStop(1, "rgba(40,120,255,0)");
+      c.fillStyle = g; c.beginPath(); c.arc(z.tx, z.ty, 46, 0, 7); c.fill();
+    }
+    const g2 = c.createRadialGradient(z.fx, z.fy, 0, z.fx, z.fy, 30);
+    g2.addColorStop(0, `rgba(255,255,255,${a * 0.9})`); g2.addColorStop(1, "rgba(60,160,255,0)");
+    c.fillStyle = g2; c.beginPath(); c.arc(z.fx, z.fy, 30, 0, 7); c.fill();
+    c.restore();
+  }
+  drawGen(x: number, y: number, now: number) {
+    const c = this.ctx, live = this.genCd <= 0, pu = 0.5 + 0.5 * Math.sin(now / 260);
+    c.save();
+    // field ring
+    if (this.role === "s") { c.strokeStyle = live ? `rgba(255,60,90,${0.18 + 0.12 * pu})` : "rgba(120,120,160,.15)"; c.lineWidth = 2; c.setLineDash([5, 8]); c.lineDashOffset = -now / 40; c.beginPath(); c.arc(x, y, 90, 0, 7); c.stroke(); c.setLineDash([]); }
+    // base
+    c.fillStyle = "rgba(0,0,0,.5)"; c.beginPath(); c.ellipse(x, y + 10, 20, 7, 0, 0, 7); c.fill();
+    c.fillStyle = "#2a2d3e"; c.beginPath(); c.ellipse(x, y + 5, 18, 8, 0, 0, 7); c.fill();
+    c.fillStyle = "#4a4f66"; c.fillRect(x - 13, y - 4, 26, 9);
+    c.fillStyle = "#1a1c28"; c.beginPath(); c.ellipse(x, y - 4, 13, 5, 0, 0, 7); c.fill();
+    c.fillStyle = live ? "#ff3b4e" : "#55586e";
+    for (let i = -1; i <= 1; i++) c.fillRect(x + i * 8 - 1.5, y + 1, 3, 2);
+    // core dome
+    c.shadowColor = live ? "#ff3b4e" : "#666"; c.shadowBlur = live ? 18 + 12 * pu : 4;
+    const g = c.createRadialGradient(x - 3, y - 12, 1, x, y - 9, 10);
+    g.addColorStop(0, live ? "#fff" : "#bbb"); g.addColorStop(0.35, live ? "#ff6b7e" : "#777"); g.addColorStop(1, live ? "#a0001c" : "#333");
+    c.fillStyle = g; c.beginPath(); c.arc(x, y - 9, 9, 0, 7); c.fill();
+    c.shadowBlur = 0;
+    if (!live) { c.strokeStyle = "#ff3b4e"; c.lineWidth = 2.5; c.beginPath(); c.arc(x, y - 9, 14, -Math.PI / 2, -Math.PI / 2 + (1 - this.genCd / 20) * Math.PI * 2); c.stroke(); }
+    // charging beam to the hunter
+    if (live && this.role === "s" && !this.shockReady && Math.hypot(x - this.me.x, y - this.me.y) < 90) {
+      c.lineCap = "round"; c.globalCompositeOperation = "lighter";
+      this.strokeBolt(this.boltPts(x, y - 9, this.me.x, this.me.y, 18), 0.9, 0.7 + 0.3 * Math.random());
+    }
+    c.restore();
   }
   drawDrone(x: number, y: number, alt: number, now: number, hooked: boolean) {
     const c = this.ctx, h = 55 * alt;
@@ -783,8 +926,15 @@ export class Game {
       const cp = this.seekers[0];
       if (this.role === "h" && cp && typeof p['cx'] === "number") cp.target = { x: p['cx'] as number, y: p['cy'] as number };
     } else if (ev === "scan") {
-      this.scans.push({ x: p['x'] as number, y: p['y'] as number, t: 0, owner: "foe", hit: false });
+      this.scans.push({ x: p['x'] as number, y: p['y'] as number, t: 0, owner: "foe", hit: false, ...(p['sh'] ? { shock: true, maxR: 380 } : {}) });
+      if (p['sh']) { this.onToast("⚡ The hunter released a SHOCK wave!"); this.vib([40]); }
       if (Math.hypot((p['x'] as number) - this.me.x, (p['y'] as number) - this.me.y) < 600) this.snd(200, 0.6, "sawtooth", 0.03, 110);
+    } else if (ev === "shk") {
+      const hx = p['x'] as number, hy = p['y'] as number;
+      this.foe.x = hx; this.foe.y = hy; this.foe.rev = 5;
+      this.foeHiderHp = Number(p['hp'] ?? this.foeHiderHp - 0.2);
+      this.triggerZap(this.me, { x: hx, y: hy }, 380);
+      this.onToast("⚡ Direct hit! Hider -1/5 health");
     } else if (ev === "spot") {
       this.foe.rev = 5;
     } else if (ev === "pow") {
@@ -877,7 +1027,14 @@ export class Game {
       }
       if ((s.owner === "ai" || s.owner === "foe") && !s.hit && this.role === "h" && me.cloak <= 0) {
         const d = Math.hypot(me.x - s.x, me.y - s.y);
-        if (Math.abs(d - r) < 14) {
+        if (Math.abs(d - r) < 14 && s.shock) {
+          s.hit = true; me.rev = 5;
+          this.triggerZap({ x: s.x, y: s.y }, me, r);
+          this.hiderHp = Math.max(0, this.hiderHp - 0.2);
+          this.onToast(`⚡ SHOCKED! -1/5 health`); this.frozenMe = Math.max(this.frozenMe, 0.8);
+          if (this.mp) this.net?.send("shk", { x: me.x, y: me.y, hp: this.hiderHp });
+          if (this.hiderHp <= 0.001) return this.finish(false, "You were electrocuted!");
+        } else if (Math.abs(d - r) < 14) {
           s.hit = true; me.rev = 5; this.shake = 0.35;
           this.onToast("👁 You've been spotted!"); this.snd(220, 0.35, "sawtooth", 0.08, 90); this.vib(80);
           if (this.mp) this.net?.send("spot", {});
@@ -893,6 +1050,7 @@ export class Game {
     this.decoy = this.stepDecoy(this.decoy, dt);
     this.foeDecoy = this.stepDecoy(this.foeDecoy, dt);
     this.updateWeapons(dt);
+    this.updateGen(dt);
     if (this.role === "h") this.updateDrones(dt);
 
     // keys + exit (hider only)
@@ -1188,7 +1346,10 @@ export class Game {
     if (window.innerWidth !== this.W || window.innerHeight !== this.H) this.resize();
     const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
     this.last = now;
-    if (this.running && !this.paused) this.update(dt);
+    if (this.zap) { this.zap.t -= dt; if (this.zap.t <= 0) this.zap = null; }
+    if (this.dark) { this.dark.t -= dt; if (this.dark.t <= 0) this.dark = null; }
+    if (this.hitStop > 0) { this.hitStop -= dt; this.shake = Math.max(0, this.shake - dt * 0.5); }
+    else if (this.running && !this.paused) this.update(dt);
     if (this.g.length && this.me) this.draw(now);
     this.hudT -= dt;
     if (this.hudT <= 0 && this.me) { this.hudT = 0.1; this.emitHud(); }
@@ -1206,6 +1367,8 @@ export class Game {
       drones: this.role === "h" ? this.drones.filter((d) => !d.dead).length : this.droneView.length,
       ropeAvail: this.role === "h" && !this.rope && !!this.nearDrone(120),
       roped: !!this.rope?.att, pull: this.rope?.d.pull ?? 0,
+      shock: { on: this.role === "s" && !!this.gen, ready: this.shockReady, charge: this.shockCharge, genCd: this.genCd, near: !!this.gen && Math.hypot(this.gen.x - this.me.x, this.gen.y - this.me.y) < 90 },
+      hiderHp: this.role === "h" ? this.hiderHp : this.foeHiderHp,
       seekers: this.seekers.map((s) => (s.frozen > 0 ? "❄️" : s.target ? "🔴" : "⚪")).join(" "),
     });
   }
@@ -1382,6 +1545,7 @@ export class Game {
       for (let y = vy0; y <= vy1; y++) for (let x = vx0; x <= vx1; x++) if (this.coins[y * N + x]) { c.beginPath(); c.arc(x * T + T / 2, y * T + T / 2, 3, 0, 7); c.fill(); }
       c.shadowBlur = 0;
     }
+    if (this.gen) this.drawGen(this.gen.x, this.gen.y, now);
     // power-ups
     c.font = "16px system-ui"; c.textAlign = "center"; c.textBaseline = "middle";
     for (const p of this.pows) {
@@ -1437,6 +1601,15 @@ export class Game {
     for (const s of this.seekers) bar(s.x, s.y, s.r, s.hp ?? 1);
     if (this.mp && this.foe && this.role === "h" && this.foeVisible()) bar(this.foe.x, this.foe.y, this.foe.r, this.foeHp);
     if (this.mp && this.role === "s") bar(me.x, me.y, me.r, this.myHp);
+    const hbar = (x: number, y: number, r: number, hp: number) => {
+      const w = 30, h = 4, bx = x - w / 2, by = y + r + 8;
+      c.fillStyle = "rgba(0,0,0,.65)"; c.fillRect(bx - 1, by - 1, w + 2, h + 2);
+      c.fillStyle = "#4fd8ff"; c.fillRect(bx, by, w * Math.max(0, hp), h);
+      c.fillStyle = "rgba(0,0,0,.8)"; for (let i = 1; i < 5; i++) c.fillRect(bx + (w * i) / 5, by, 1, h);
+    };
+    for (const h of this.hiders) if (this.hiderVisible(h) && (h.hp ?? 1) < 1) hbar(h.x, h.y, h.r, h.hp ?? 1);
+    if (this.mp && this.foe && this.role === "s" && this.foeVisible() && this.foeHiderHp < 1) hbar(this.foe.x, this.foe.y, this.foe.r, this.foeHiderHp);
+    if (this.role === "h" && this.hiderHp < 1) hbar(me.x, me.y, me.r, this.hiderHp);
 
     // falling bullets
     for (const b of this.bullets) {
@@ -1502,8 +1675,21 @@ export class Game {
       c.restore();
     }
 
+    // shock: darkness outside the circle, then the lightning on top
+    if (this.dark) {
+      const d = this.dark, a = Math.min(1, (1.6 - d.t) / 0.12) * Math.min(1, d.t / 0.5);
+      c.save();
+      c.beginPath(); c.rect(d.x - 4000, d.y - 4000, 8000, 8000); c.arc(d.x, d.y, d.r, 0, Math.PI * 2, true);
+      c.fillStyle = `rgba(0,0,4,${0.9 * a})`; c.fill("evenodd");
+      c.shadowColor = "#ff2b4e"; c.shadowBlur = 24;
+      c.strokeStyle = `rgba(255,50,80,${a})`; c.lineWidth = 3; c.beginPath(); c.arc(d.x, d.y, d.r, 0, 7); c.stroke();
+      c.restore();
+    }
+    if (this.zap) this.drawZap(this.zap, now);
+
     // danger vignette
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (this.zap && this.zap.t > 1.15) { c.fillStyle = `rgba(200,240,255,${(this.zap.t - 1.15) * 3})`; c.fillRect(0, 0, W, H); }
     let danger = 0;
     for (const s of this.seekers) danger = Math.max(danger, 1 - Math.hypot(s.x - me.x, s.y - me.y) / 300);
     if (this.mp && this.role === "h" && this.foe) danger = Math.max(danger, 1 - Math.hypot(this.foe.x - me.x, this.foe.y - me.y) / 300);
@@ -1554,6 +1740,7 @@ export class Game {
     for (const p of this.portals) { dot(p.a.x, p.a.y, p.c, 2); dot(p.b.x, p.b.y, p.c, 2); }
     for (const p of this.pows) dot(p.x, p.y, POW[p.k].c, 2);
     for (const cb of this.cubes) if (cb.vis > 0) dot(cb.x, cb.y, "#ffc93c", 2.4);
+    if (this.gen) dot(this.gen.x, this.gen.y, "#ff3b4e", 3);
     if (this.exit) dot(this.exit.x, this.exit.y, "#3dff8a", 3.5);
     for (const s of this.seekers) dot(s.x, s.y, s.hue);
     for (const h of this.hiders) if (this.hiderVisible(h)) dot(h.x, h.y, "#7fb0ff");
