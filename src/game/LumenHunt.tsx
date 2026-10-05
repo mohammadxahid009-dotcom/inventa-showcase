@@ -237,8 +237,8 @@ export default function LumenHunt() {
           ))}
         </div>
       )}
-      {playing && hud?.shock.on && !hud.shock.ready && hud.shock.near && hud.shock.genCd <= 0 && (
-        <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-neon-blue bg-void-glass px-4 py-1 text-xs font-bold">⚡ Charging SHOCK… {Math.round(hud.shock.charge * 100)}%</div>
+      {playing && hud?.shock?.on && !hud.shock!.ready && hud.shock!.near && hud.shock!.genCd <= 0 && (
+        <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-neon-blue bg-void-glass px-4 py-1 text-xs font-bold">⚡ Charging SHOCK… {Math.round(hud.shock!.charge * 100)}%</div>
       )}
       {playing && hud?.alarm && (
         <div className="pointer-events-none absolute left-1/2 top-14 -translate-x-1/2 rounded-full border border-neon-red bg-void-glass px-4 py-1.5 text-sm font-bold">{hud.alarm}</div>
@@ -338,20 +338,20 @@ export default function LumenHunt() {
           >
             {hud && hud.dashCd > 0 ? Math.ceil(hud.dashCd) : "DASH"}
           </button>
-          {hud?.shock.on && (
+          {hud?.shock?.on && (
             <button
               onPointerDown={(e) => { e.preventDefault(); g?.doShock(); }}
-              className={`absolute bottom-40 right-8 flex h-20 w-20 flex-col items-center justify-center rounded-full text-xs font-extrabold ${hud.shock.ready ? "animate-pulse text-ink shadow-[0_0_28px_#3fb8ff]" : "text-ink/70"}`}
+              className={`absolute bottom-40 right-8 flex h-20 w-20 flex-col items-center justify-center rounded-full text-xs font-extrabold ${hud.shock!.ready ? "animate-pulse text-ink shadow-[0_0_28px_#3fb8ff]" : "text-ink/70"}`}
               style={{
-                background: hud.shock.ready
+                background: hud.shock!.ready
                   ? "radial-gradient(circle, #6fd8ff 0%, #1f6bff 70%)"
-                  : `conic-gradient(#3fb8ff ${hud.shock.charge * 360}deg, rgba(30,40,70,.85) 0deg)`,
+                  : `conic-gradient(#3fb8ff ${hud.shock!.charge * 360}deg, rgba(30,40,70,.85) 0deg)`,
                 border: "2px solid #7fe6ff",
               }}
             >
               <span className="text-2xl leading-none">⚡</span>
               <span className="text-[10px]">
-                {hud.shock.ready ? "SHOCK" : hud.shock.charge > 0 ? `${Math.round(hud.shock.charge * 100)}%` : hud.shock.genCd > 0 ? `${Math.ceil(hud.shock.genCd)}s` : "GEN"}
+                {hud.shock!.ready ? "SHOCK" : hud.shock!.charge > 0 ? `${Math.round(hud.shock!.charge * 100)}%` : hud.shock!.genCd > 0 ? `${Math.ceil(hud.shock!.genCd)}s` : "GEN"}
               </span>
             </button>
           )}
