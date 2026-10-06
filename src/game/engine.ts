@@ -338,6 +338,7 @@ export class Game {
       this.portals.push({ a: this.freeTile(), b: this.freeTile(), c });
     }
     this.spawnCubes();
+    this.gen = this.freeTile(Math.random, this.me, 360);
     this.onToast(level > 1 ? `Level ${level} — the hunters are faster` : "Scan to reveal keys. Collect 5 real keys, then reach the exit!");
     this.begin();
   }
@@ -1756,7 +1757,7 @@ export class Game {
     for (const p of this.portals) { dot(p.a.x, p.a.y, p.c, 2); dot(p.b.x, p.b.y, p.c, 2); }
     for (const p of this.pows) dot(p.x, p.y, POW[p.k].c, 2);
     for (const cb of this.cubes) if (cb.vis > 0) dot(cb.x, cb.y, "#ffc93c", 2.4);
-    if (this.gen) dot(this.gen.x, this.gen.y, "#ff3b4e", 3);
+    if (this.gen) { const gp = 0.5 + 0.5 * Math.sin(performance.now() / 200); c.strokeStyle = `rgba(127,230,255,${0.5 + 0.5 * gp})`; c.lineWidth = 1.5; c.beginPath(); c.arc(this.gen.x * S, this.gen.y * S, 4.5 + gp * 2, 0, 7); c.stroke(); dot(this.gen.x, this.gen.y, "#ffe14a", 3); }
     if (this.exit) dot(this.exit.x, this.exit.y, "#3dff8a", 3.5);
     for (const s of this.seekers) dot(s.x, s.y, s.hue);
     for (const h of this.hiders) if (this.hiderVisible(h)) dot(h.x, h.y, "#7fb0ff");
