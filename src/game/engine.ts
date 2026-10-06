@@ -1382,7 +1382,7 @@ export class Game {
       drones: this.role === "h" ? this.drones.filter((d) => !d.dead).length : this.droneView.length,
       ropeAvail: this.role === "h" && !this.rope && !!this.nearDrone(120),
       roped: !!this.rope?.att, pull: this.rope?.d.pull ?? 0,
-      shock: { on: this.role === "s" && !!this.gen, ready: this.shockReady, charge: this.shockCharge, genCd: this.genCd, near: !!this.gen && Math.hypot(this.gen.x - this.me.x, this.gen.y - this.me.y) < 90 },
+      shock: { on: this.role === "s" && (!!this.gen || this.shockReady), ready: this.shockReady, charge: this.shockCharge, genCd: this.genCd, near: !!this.gen && Math.hypot(this.gen.x - this.me.x, this.gen.y - this.me.y) < 90 },
       hiderHp: this.role === "h" ? this.hiderHp : this.foeHiderHp,
       seekers: this.seekers.map((s) => (s.frozen > 0 ? "❄️" : s.target ? "🔴" : "⚪")).join(" "),
     });
