@@ -161,7 +161,7 @@ export class Game {
   coins: Uint8Array = new Uint8Array(N * N);
   coinsSet = false;
   gen: { x: number; y: number } | null = null;
-  genCd = 0; genHp = 1; shockCharge = 0; shockReady = false; zapCache: { k: number; bolts: { pts: [number, number][]; w: number; a: number }[] } | null = null;
+  genCd = 0; genHp = 1; genHit = 0; shockCharge = 0; shockReady = false; zapCache: { k: number; bolts: { pts: [number, number][]; w: number; a: number }[] } | null = null;
   hiderHp = 1; foeHiderHp = 1;
   hitStop = 0;
   zap: { fx: number; fy: number; tx: number; ty: number; t: number } | null = null;
@@ -468,7 +468,7 @@ export class Game {
 
   resetCommon(start: { x: number; y: number }) {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
-    this.foe = null; this.exit = null; this.coinsSet = false; this.gen = null; this.genHp = 1; this.zapCache = null; this.genCd = 0; this.shockCharge = 0; this.shockReady = false; this.hiderHp = 1; this.foeHiderHp = 1; this.hitStop = 0; this.zap = null; this.dark = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
+    this.foe = null; this.exit = null; this.coinsSet = false; this.gen = null; this.genHp = 1; this.genHit = 0; this.zapCache = null; this.genCd = 0; this.shockCharge = 0; this.shockReady = false; this.hiderHp = 1; this.foeHiderHp = 1; this.hitStop = 0; this.zap = null; this.dark = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
@@ -528,7 +528,7 @@ export class Game {
     this.burst(to.x, to.y, "#7fe6ff", 34); this.burst(to.x, to.y, "#ffffff", 14);
   }
   updateGen(dt: number) {
-    this.genCd = Math.max(0, this.genCd - dt);
+    this.genCd = Math.max(0, this.genCd - dt); this.genHit = Math.max(0, this.genHit - dt);
     if (this.role !== "s" || !this.gen || this.shockReady) return;
     const near = Math.hypot(this.gen.x - this.me.x, this.gen.y - this.me.y) < 90;
     if (near && this.genCd <= 0) {
@@ -766,6 +766,11 @@ export class Game {
     g.addColorStop(0, live ? "#fff" : "#bbb"); g.addColorStop(0.35, live ? "#ff6b7e" : "#777"); g.addColorStop(1, live ? "#a0001c" : "#333");
     c.fillStyle = g; c.beginPath(); c.arc(x, y - 9, 9, 0, 7); c.fill();
     c.shadowBlur = 0;
+    if (this.genHit > 0) { c.fillStyle = `rgba(255,255,255,${this.genHit * 3})`; c.beginPath(); c.arc(x, y - 9, 11, 0, 7); c.fill(); }
+    if (this.genHp < 0.5 && Math.random() < 0.15) this.parts.push({ x: x + (Math.random() - 0.5) * 16, y: y - 12, vx: (Math.random() - 0.5) * 30, vy: -40, l: 0.6, c: Math.random() < 0.5 ? "#888" : "#ffb347" });
+    { const hp = Math.max(0, this.genHp), col = hp > 0.6 ? "#3dff8a" : hp > 0.3 ? "#ffd84a" : "#ff3b4e";
+      c.fillStyle = "rgba(0,0,0,.7)"; c.fillRect(x - 18, y - 34, 36, 6);
+      c.fillStyle = col; c.fillRect(x - 17, y - 33, 34 * hp, 4); }
     if (!live) { c.strokeStyle = "#ff3b4e"; c.lineWidth = 2.5; c.beginPath(); c.arc(x, y - 9, 14, -Math.PI / 2, -Math.PI / 2 + (1 - this.genCd / 20) * Math.PI * 2); c.stroke(); }
     // charging beam to the hunter
     if (live && this.role === "s" && !this.shockReady && Math.hypot(x - this.me.x, y - this.me.y) < 90) {
@@ -855,7 +860,10 @@ export class Game {
     const ko = (hp: number) => hp <= 0.001;
     if (id === "g") {
       if (!this.gen) return;
-      this.genHp -= amt * 3; // one missile, 4 mini missiles or a full bullet rain destroys it
+      this.genHp -= amt * 1.2; // each weapon load takes ~40%
+      this.genHit = 0.25;
+      this.burst(this.gen.x, this.gen.y - 9, "#ffe14a", 6);
+      if (!ko(this.genHp) && amt > 0.05) this.onToast(`⚡ Generator hit — ${Math.round(this.genHp * 100)}% left`);
       if (ko(this.genHp)) {
         const g = this.gen; this.gen = null; this.shockCharge = 0;
         this.burst(g.x, g.y, "#ff3b4e", 50); this.burst(g.x, g.y, "#ffe14a", 30); this.burst(g.x, g.y, "#7fe6ff", 20);
