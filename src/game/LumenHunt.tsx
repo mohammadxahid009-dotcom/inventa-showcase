@@ -211,10 +211,10 @@ export default function LumenHunt() {
       <div className={`pointer-events-none absolute inset-x-0 top-2 flex items-start justify-between px-3 text-sm font-bold ${playing ? "" : "invisible"}`}>
         <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
           {hud?.mp
-            ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal} · ⏱ ${fmt(hud.timeLeft ?? 0)} · ${room}`
+            ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal}${hud.role === "h" ? ` · 🟡 ${hud.coins ?? 0}` : ""} · ⏱ ${fmt(hud.timeLeft ?? 0)} · ${room}`
             : hud?.hunt
               ? `🎯 ${hud.score}/2 caught · ⏱ ${fmt(hud.timeLeft ?? 0)} · Lv ${hud.level}`
-              : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · Lv ${hud?.level ?? 1}`}
+              : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · 🟡 ${hud?.coins ?? 0} · Lv ${hud?.level ?? 1}`}
         </div>
         {hud?.seen && <div className="rounded-full border border-neon-red bg-void-glass px-3 py-1.5 text-neon-red">👁 SEEN</div>}
         <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
