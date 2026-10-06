@@ -161,7 +161,7 @@ export class Game {
   coins: Uint8Array = new Uint8Array(N * N);
   coinsSet = false;
   gen: { x: number; y: number } | null = null;
-  genCd = 0; shockCharge = 0; shockReady = false;
+  genCd = 0; genHp = 1; shockCharge = 0; shockReady = false; zapCache: { k: number; bolts: { pts: [number, number][]; w: number; a: number }[] } | null = null;
   hiderHp = 1; foeHiderHp = 1;
   hitStop = 0;
   zap: { fx: number; fy: number; tx: number; ty: number; t: number } | null = null;
@@ -467,7 +467,7 @@ export class Game {
 
   resetCommon(start: { x: number; y: number }) {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
-    this.foe = null; this.exit = null; this.coinsSet = false; this.gen = null; this.genCd = 0; this.shockCharge = 0; this.shockReady = false; this.hiderHp = 1; this.foeHiderHp = 1; this.hitStop = 0; this.zap = null; this.dark = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
+    this.foe = null; this.exit = null; this.coinsSet = false; this.gen = null; this.genHp = 1; this.zapCache = null; this.genCd = 0; this.shockCharge = 0; this.shockReady = false; this.hiderHp = 1; this.foeHiderHp = 1; this.hitStop = 0; this.zap = null; this.dark = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
@@ -518,7 +518,7 @@ export class Game {
     if (this.mp) this.net?.send("scan", { x: this.me.x, y: this.me.y, sh: 1 });
   }
   triggerZap(from: { x: number; y: number }, to: { x: number; y: number }, r: number) {
-    this.hitStop = 0.45;
+    this.hitStop = 0.12; this.zapCache = null;
     this.zap = { fx: from.x, fy: from.y, tx: to.x, ty: to.y, t: 1.3 };
     this.dark = { x: from.x, y: from.y, r: Math.max(r, Math.hypot(to.x - from.x, to.y - from.y) + 40), t: 1.6 };
     this.shake = 0.6; this.vib([60, 30, 120]);
@@ -700,11 +700,9 @@ export class Game {
     const c = this.ctx;
     c.beginPath(); c.moveTo(pts[0]![0], pts[0]![1]);
     for (const [x, y] of pts) c.lineTo(x, y);
-    c.shadowColor = "#3fb8ff"; c.shadowBlur = 30;
-    c.strokeStyle = `rgba(60,150,255,${0.35 * a})`; c.lineWidth = w * 4; c.stroke();
-    c.shadowBlur = 16;
+    c.strokeStyle = `rgba(40,120,255,${0.18 * a})`; c.lineWidth = w * 7; c.stroke();
+    c.strokeStyle = `rgba(60,160,255,${0.35 * a})`; c.lineWidth = w * 3.5; c.stroke();
     c.strokeStyle = `rgba(120,230,255,${0.9 * a})`; c.lineWidth = w * 1.6; c.stroke();
-    c.shadowBlur = 0;
     c.strokeStyle = `rgba(255,255,255,${a})`; c.lineWidth = w * 0.6; c.stroke();
   }
   drawZap(z: { fx: number; fy: number; tx: number; ty: number; t: number }, now: number) {
@@ -716,22 +714,26 @@ export class Game {
     const grow = Math.min(1, (1.3 - z.t) / 0.15);
     const ex = z.fx + (z.tx - z.fx) * grow, ey = z.fy + (z.ty - z.fy) * grow;
     c.save(); c.lineCap = "round"; c.lineJoin = "round"; c.globalCompositeOperation = "lighter";
-    const main = this.boltPts(z.fx, z.fy, ex, ey, Math.min(90, len * 0.35));
-    this.strokeBolt(main, 2.6, a);
-    this.strokeBolt(this.boltPts(z.fx, z.fy, ex, ey, Math.min(120, len * 0.45)), 1.1, a * 0.6);
-    // forks
-    for (let i = 0; i < 5; i++) {
-      const p = main[Math.floor(main.length * (0.15 + Math.random() * 0.75))];
-      if (!p) continue;
-      const ang = Math.atan2(ey - z.fy, ex - z.fx) + (Math.random() - 0.5) * 2.2, fl = 20 + Math.random() * 50;
-      this.strokeBolt(this.boltPts(p[0], p[1], p[0] + Math.cos(ang) * fl, p[1] + Math.sin(ang) * fl, fl * 0.5), 0.8, a * 0.8);
-    }
-    if (grow >= 1) {
-      // impact: crackling tendrils + shock rings around the hider
-      for (let i = 0; i < 6; i++) {
-        const ang = Math.random() * 7, fl = 14 + Math.random() * 26;
-        this.strokeBolt(this.boltPts(z.tx, z.ty, z.tx + Math.cos(ang) * fl, z.ty + Math.sin(ang) * fl, 12), 0.7, a);
+    const key = Math.floor(now / 60) * 10 + (grow >= 1 ? 1 : 0);
+    if (!this.zapCache || this.zapCache.k !== key || grow < 1) {
+      const bolts: { pts: [number, number][]; w: number; a: number }[] = [];
+      const main = this.boltPts(z.fx, z.fy, ex, ey, Math.min(90, len * 0.35));
+      bolts.push({ pts: main, w: 2.6, a: 1 });
+      bolts.push({ pts: this.boltPts(z.fx, z.fy, ex, ey, Math.min(120, len * 0.45)), w: 1.1, a: 0.6 });
+      for (let i = 0; i < 2; i++) {
+        const p = main[Math.floor(main.length * (0.2 + Math.random() * 0.6))];
+        if (!p) continue;
+        const ang = Math.atan2(ey - z.fy, ex - z.fx) + (Math.random() - 0.5) * 2.2, fl = 20 + Math.random() * 50;
+        bolts.push({ pts: this.boltPts(p[0], p[1], p[0] + Math.cos(ang) * fl, p[1] + Math.sin(ang) * fl, fl * 0.5), w: 0.8, a: 0.8 });
       }
+      if (grow >= 1) {
+        const ang = Math.random() * 7, fl = 16 + Math.random() * 24;
+        bolts.push({ pts: this.boltPts(z.tx, z.ty, z.tx + Math.cos(ang) * fl, z.ty + Math.sin(ang) * fl, 12), w: 0.7, a: 1 });
+      }
+      this.zapCache = { k: key, bolts };
+    }
+    for (const b of this.zapCache.bolts) this.strokeBolt(b.pts, b.w, a * b.a);
+    if (grow >= 1) {
       const rp = 1 - k;
       c.strokeStyle = `rgba(140,230,255,${(1 - rp) * 0.9})`; c.lineWidth = 3;
       c.beginPath(); c.arc(z.tx, z.ty, 10 + rp * 60, 0, 7); c.stroke();
@@ -836,6 +838,7 @@ export class Game {
   // hunter entity by id ("f" = human hunter, "cN" = AI seeker N), on either client
   ent(id: string): { x: number; y: number; r: number } | null {
     if (id === "f") return this.role === "h" ? this.foe : this.me;
+    if (id === "g") return this.gen ? { x: this.gen.x, y: this.gen.y, r: 18 } : null;
     return this.seekers[Number(id.slice(1))] ?? null;
   }
   targets() {
@@ -843,11 +846,23 @@ export class Game {
     if (this.role !== "h") return out;
     this.seekers.forEach((s, i) => out.push({ id: "c" + i, x: s.x, y: s.y, r: s.r }));
     if (this.mp && this.foe) out.push({ id: "f", x: this.foe.x, y: this.foe.y, r: this.foe.r });
+    if (this.gen) out.push({ id: "g", x: this.gen.x, y: this.gen.y, r: 18 });
     return out;
   }
   hurt(id: string, amt: number, local: boolean) {
     if (local && this.mp) this.net?.send("dmg", { id, a: amt });
     const ko = (hp: number) => hp <= 0.001;
+    if (id === "g") {
+      if (!this.gen) return;
+      this.genHp -= amt * 3; // one missile, 4 mini missiles or a full bullet rain destroys it
+      if (ko(this.genHp)) {
+        const g = this.gen; this.gen = null; this.shockCharge = 0;
+        this.burst(g.x, g.y, "#ff3b4e", 50); this.burst(g.x, g.y, "#ffe14a", 30); this.burst(g.x, g.y, "#7fe6ff", 20);
+        this.shake = Math.max(this.shake, 0.5); this.snd(55, 0.9, "sawtooth", 0.12, 25);
+        this.onToast(this.role === "h" ? "💥 Generator destroyed — no more SHOCK!" : "💥 The hider destroyed your generator!");
+      }
+      return;
+    }
     if (id === "f") {
       if (this.role === "h") {
         this.foeHp -= amt;
@@ -869,7 +884,7 @@ export class Game {
       let best: string | null = null, bd = 34;
       for (const t of this.targets()) { const d = Math.hypot(t.x - this.aim.x, t.y - this.aim.y); if (d < bd + t.r) { bd = d; best = t.id; } }
       if (best && best === this.lockId) {
-        const was = this.lock; this.lock = Math.min(1, this.lock + dt / 1.1);
+        const was = this.lock; this.lock = Math.min(1, this.lock + dt / 0.65);
         if (was < 1 && this.lock >= 1) { this.snd(1400, 0.15, "square", 0.05, 1800); this.vib([20]); }
       } else if (best) { this.lockId = best; this.lock = 0; }
       else { this.lock = Math.max(0, this.lock - dt * 2.5); if (this.lock <= 0) this.lockId = null; }
@@ -1679,9 +1694,10 @@ export class Game {
     if (this.dark) {
       const d = this.dark, a = Math.min(1, (1.6 - d.t) / 0.12) * Math.min(1, d.t / 0.5);
       c.save();
-      c.beginPath(); c.rect(d.x - 4000, d.y - 4000, 8000, 8000); c.arc(d.x, d.y, d.r, 0, Math.PI * 2, true);
+      const ext = Math.max(this.W, this.H) * 1.5 + d.r;
+      c.beginPath(); c.rect(this.me.x - ext, this.me.y - ext, ext * 2, ext * 2); c.arc(d.x, d.y, d.r, 0, Math.PI * 2, true);
       c.fillStyle = `rgba(0,0,4,${0.9 * a})`; c.fill("evenodd");
-      c.shadowColor = "#ff2b4e"; c.shadowBlur = 24;
+      c.strokeStyle = `rgba(255,50,80,${0.35 * a})`; c.lineWidth = 9; c.beginPath(); c.arc(d.x, d.y, d.r, 0, 7); c.stroke();
       c.strokeStyle = `rgba(255,50,80,${a})`; c.lineWidth = 3; c.beginPath(); c.arc(d.x, d.y, d.r, 0, 7); c.stroke();
       c.restore();
     }
