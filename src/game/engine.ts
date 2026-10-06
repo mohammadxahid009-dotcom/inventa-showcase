@@ -7,6 +7,7 @@ export const N = 31;
 export type Role = "h" | "s";
 export type Hud = {
   score: number;
+  coins: number;
   goal: number;
   level: number;
   scanCd: number;
@@ -159,7 +160,7 @@ export class Game {
   weapon: "missile" | "rain" | "mini" | null = null;
   exit: { x: number; y: number } | null = null;
   coins: Uint8Array = new Uint8Array(N * N);
-  coinsSet = false;
+  coinsSet = false; coinsLeft = 0;
   gen: { x: number; y: number } | null = null;
   genCd = 0; genHp = 1; genHit = 0; shockCharge = 0; shockReady = false; zapCache: { k: number; bolts: { pts: [number, number][]; w: number; a: number }[] } | null = null;
   hiderHp = 1; foeHiderHp = 1;
@@ -492,6 +493,7 @@ export class Game {
       if (!this.exit) this.exit = this.freeTile(Math.random, this.me, 400);
       this.coins = new Uint8Array(N * N);
       for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) if (!this.g[y]?.[x]) this.coins[y * N + x] = 1;
+      this.coinsLeft = this.coins.reduce((a, v) => a + v, 0);
     }
     if (this.score >= this.goal) return;
     const real = Math.floor(Math.random() * 4);
@@ -1079,14 +1081,15 @@ export class Game {
 
     // keys + exit (hider only)
     if (this.role === "h" && this.exit && Math.hypot(this.exit.x - me.x, this.exit.y - me.y) < 22) {
-      if (this.score >= this.goal) return this.finish(true, this.mp ? "You escaped with all 5 keys!" : `Escaped! Level ${this.level} cleared!`);
+      if (this.score >= this.goal && this.coinsLeft <= 0) return this.finish(true, this.mp ? "You escaped with all 5 keys!" : `Escaped! Level ${this.level} cleared!`);
+      if (this.portalCd <= 0 && this.score >= this.goal) { this.onToast(`🔒 EXIT DENIED — ${this.coinsLeft} coin${this.coinsLeft === 1 ? "" : "s"} still in the maze!`); this.portalCd = 1.5; }
       if (this.portalCd <= 0) { this.onToast(`🔒 Exit locked — ${this.goal - this.score} more key${this.goal - this.score === 1 ? "" : "s"} needed`); this.portalCd = 1.5; }
     }
     if (this.role === "h") {
       const ci = Math.floor(me.y / T) * N + Math.floor(me.x / T);
       if (this.coins[ci]) {
         const cx = (ci % N) * T + T / 2, cy = Math.floor(ci / N) * T + T / 2;
-        if (Math.hypot(cx - me.x, cy - me.y) < 14) { this.coins[ci] = 0; this.snd(1200 + Math.random() * 200, 0.05, "square", 0.02, 1700); this.burst(cx, cy, "#ffd6a0", 3); }
+        if (Math.hypot(cx - me.x, cy - me.y) < 14) { this.coins[ci] = 0; this.coinsLeft--; if (this.coinsLeft === 0) this.onToast(this.score >= this.goal ? "🔓 Maze cleared — run to the EXIT!" : "🟡 All coins collected! Now find the keys"); this.snd(1200 + Math.random() * 200, 0.05, "square", 0.02, 1700); this.burst(cx, cy, "#ffd6a0", 3); }
       }
       for (const c of this.cubes) c.vis = Math.max(0, c.vis - dt);
       for (const c of [...this.cubes]) {
@@ -1381,7 +1384,7 @@ export class Game {
 
   emitHud() {
     this.onHud({
-      score: this.score, goal: this.goal, level: this.level,
+      score: this.score, coins: this.coinsLeft, goal: this.goal, level: this.level,
       scanCd: this.scanCd, dashCd: this.dashCd, decoyCd: this.decoyCd,
       seen: this.me.rev > 0, timeLeft: this.mp || this.hunt ? Math.max(0, this.timeLeft) : null,
       alarm: this.alarmA > 0 ? "🚨 ALARM — you are tracked!" : this.alarmW > 0 ? `🚨 Alarm in ${Math.ceil(this.alarmW)}s` : "",
@@ -1551,7 +1554,7 @@ export class Game {
       c.restore();
     }
     if (this.exit) {
-      const ex = this.exit, open = this.score >= this.goal, col = open ? "#3dff8a" : "#2fd6a0";
+      const ex = this.exit, open = this.score >= this.goal && (this.role !== "h" || this.coinsLeft <= 0), col = open ? "#3dff8a" : "#2fd6a0";
       const pu = 1 + 0.08 * Math.sin(now / (open ? 120 : 400));
       c.save(); c.translate(ex.x, ex.y); c.shadowColor = col; c.shadowBlur = open ? 30 : 14;
       c.fillStyle = col + "33"; c.fillRect(-20 * pu, -20 * pu, 40 * pu, 40 * pu);
@@ -1766,6 +1769,7 @@ export class Game {
     for (const p of this.pows) dot(p.x, p.y, POW[p.k].c, 2);
     for (const cb of this.cubes) if (cb.vis > 0) dot(cb.x, cb.y, "#ffc93c", 2.4);
     if (this.gen) { const gp = 0.5 + 0.5 * Math.sin(performance.now() / 200); c.strokeStyle = `rgba(127,230,255,${0.5 + 0.5 * gp})`; c.lineWidth = 1.5; c.beginPath(); c.arc(this.gen.x * S, this.gen.y * S, 4.5 + gp * 2, 0, 7); c.stroke(); dot(this.gen.x, this.gen.y, "#ffe14a", 3); }
+    if (this.role === "h" && this.coinsLeft > 0 && this.coinsLeft <= 25) for (let i = 0; i < N * N; i++) if (this.coins[i]) dot((i % N) * T + T / 2, Math.floor(i / N) * T + T / 2, "#ffc9a0", 1.6);
     if (this.exit) dot(this.exit.x, this.exit.y, "#3dff8a", 3.5);
     for (const s of this.seekers) dot(s.x, s.y, s.hue);
     for (const h of this.hiders) if (this.hiderVisible(h)) dot(h.x, h.y, "#7fb0ff");
