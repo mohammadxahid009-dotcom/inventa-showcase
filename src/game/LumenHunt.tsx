@@ -22,6 +22,7 @@ export default function LumenHunt() {
   const startedRef = useRef(false);
   const voiceRef = useRef<Voice | null>(null);
   const isHostRef = useRef(false);
+  const roomRef = useRef("");
   const [vc, setVc] = useState<VoiceState | null>(null);
   const stopVoice = () => { voiceRef.current?.stop(); voiceRef.current = null; setVc(null); };
 
@@ -109,9 +110,9 @@ export default function LumenHunt() {
     startedRef.current = true;
     setEnd(null); setPaused(false);
     const ch = chRef.current!;
-    if (voiceRef.current?.ch !== ch) {
+    if (voiceRef.current?.key !== roomRef.current) {
       voiceRef.current?.stop();
-      if (typeof RTCPeerConnection !== "undefined") voiceRef.current = new Voice(ch, isHostRef.current, setVc);
+      if (typeof RTCPeerConnection !== "undefined" && roomRef.current) voiceRef.current = new Voice(roomRef.current, isHostRef.current, setVc);
     }
     gameRef.current!.startMp(seed, myRole, {
       send: (ev, payload) => { void ch.send({ type: "broadcast", event: ev, payload }); },
@@ -128,6 +129,7 @@ export default function LumenHunt() {
   const joinRoom = (code: string, host: boolean) => {
     stopVoice();
     isHostRef.current = host;
+    roomRef.current = code;
     if (chRef.current) void supabase.removeChannel(chRef.current);
     startedRef.current = false;
     setRoom(code); setIsHost(host);
@@ -157,7 +159,6 @@ export default function LumenHunt() {
     for (const ev of ["st", "coin", "scan", "spot", "decoy", "pow", "dmg", "mis", "bul", "shk"]) {
       ch.on("broadcast", { event: ev }, ({ payload }) => gameRef.current?.netIn(ev, payload));
     }
-    ch.on("broadcast", { event: "rtc" }, ({ payload }) => { void voiceRef.current?.onSignal(payload); });
     ch.on("broadcast", { event: "end" }, ({ payload }) => gameRef.current?.remoteEnd(payload.w, payload.text));
     ch.on("broadcast", { event: "rematch" }, ({ payload }) => { if (!host) beginMatch(payload.seed, payload.hr === "h" ? "s" : "h", !!payload.co); });
 
