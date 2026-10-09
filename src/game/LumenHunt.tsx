@@ -223,24 +223,23 @@ export default function LumenHunt() {
       <div className="pointer-events-auto contents">
 
       {/* HUD */}
-      <div className={`pointer-events-none absolute inset-x-0 top-2 flex items-start justify-between px-3 text-sm font-bold ${playing ? "" : "invisible"}`}>
-        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5">
+      <div className={`pointer-events-none absolute inset-x-0 top-2 flex items-center justify-between gap-2 px-3 text-xs font-bold ${playing ? "" : "invisible"}`}>
+        <div className="min-w-0 truncate whitespace-nowrap rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5">
           {hud?.mp
             ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal} · 🟡 ${hud.coins ?? 0} · ${room}`
             : hud?.hunt
               ? `🎯 ${hud.score}/2 caught · ⏱ ${fmt(hud.timeLeft ?? 0)} · Lv ${hud.level}`
               : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · 🟡 ${hud?.coins ?? 0} · Lv ${hud?.level ?? 1}`}
         </div>
-        {hud?.seen && <div className="rounded-full border border-neon-red bg-void-glass px-3 py-1.5 text-neon-red">👁 SEEN</div>}
-        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5">
+                <div className="shrink-0 whitespace-nowrap rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5">
           {hud?.mp || hud?.hunt ? `You: ${hud.role === "h" ? "HIDER" : "HUNTER"}` : hud?.seekers}
         </div>
       </div>
       {playing && hud?.mp && vc && (
-        <div className="absolute right-16 top-14 flex flex-col items-end gap-1 text-xs font-bold">
+        <div className="absolute right-3 top-[5.25rem] flex flex-col items-end gap-1 text-[11px] font-bold">
           <button
             onClick={() => void voiceRef.current?.setMic(!vc.micOn)}
-            className={`rounded-full border bg-void-glass px-3 py-1.5 transition-shadow ${vc.micOn ? "border-neon-blue text-neon-blue" : "border-ink/30 text-ink/70"} ${vc.meTalking ? "shadow-[0_0_14px_currentColor]" : ""}`}
+            className={`rounded-full border bg-void-glass px-2.5 py-1 transition-shadow ${vc.micOn ? "border-neon-blue text-neon-blue" : "border-ink/30 text-ink/70"} ${vc.meTalking ? "shadow-[0_0_14px_currentColor]" : ""}`}
           >
             {vc.micOn ? "🎙️ Mic on" : "🔇 Mic off"}
           </button>
@@ -251,9 +250,9 @@ export default function LumenHunt() {
         </div>
       )}
       {playing && hud?.mp && hud.role === "s" && (
-        <div className="pointer-events-none absolute left-1/2 top-12 flex -translate-x-1/2 items-center gap-2 text-xs font-bold">
+        <div className="pointer-events-none absolute left-1/2 top-12 flex -translate-x-1/2 items-center gap-1 text-xs font-bold">
           ❤️
-          <div className="h-2.5 w-32 overflow-hidden rounded-full border border-ink/30 bg-void-glass">
+          <div className="h-2.5 w-24 overflow-hidden rounded-full border border-ink/30 bg-void-glass">
             <div className={`h-full transition-all ${hud.hp > 0.67 ? "bg-neon-blue" : hud.hp > 0.34 ? "bg-neon-yellow" : "bg-neon-red"}`} style={{ width: `${Math.max(0, hud.hp) * 100}%` }} />
           </div>
         </div>
@@ -262,29 +261,32 @@ export default function LumenHunt() {
         <div className="pointer-events-none absolute left-1/2 top-12 flex -translate-x-1/2 items-center gap-1 text-xs font-bold">
           ⚡
           {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-2.5 w-6 rounded-sm border border-ink/30" style={{ background: hud.hiderHp > i * 0.2 + 0.01 ? "#4fd8ff" : "rgba(10,10,30,.7)" }} />
+            <div key={i} className="h-2.5 w-4 rounded-sm border border-ink/30" style={{ background: hud.hiderHp > i * 0.2 + 0.01 ? "#4fd8ff" : "rgba(10,10,30,.7)" }} />
           ))}
         </div>
       )}
       {playing && hud?.shock?.on && !hud.shock!.ready && hud.shock!.near && hud.shock!.genCd <= 0 && (
-        <div className="pointer-events-none absolute left-1/2 top-24 -translate-x-1/2 rounded-full border border-neon-blue bg-void-glass px-4 py-1 text-xs font-bold">⚡ Charging SHOCK… {Math.round(hud.shock!.charge * 100)}%</div>
+        <div className="pointer-events-none absolute left-1/2 top-[6.5rem] -translate-x-1/2 whitespace-nowrap rounded-full border border-neon-blue bg-void-glass px-3 py-1 text-xs font-bold">⚡ Charging SHOCK… {Math.round(hud.shock!.charge * 100)}%</div>
       )}
       {playing && hud?.alarm && (
-        <div className="pointer-events-none absolute left-1/2 top-14 -translate-x-1/2 rounded-full border border-neon-red bg-void-glass px-4 py-1.5 text-sm font-bold">{hud.alarm}</div>
+        <div className="pointer-events-none absolute left-1/2 top-[8.5rem] -translate-x-1/2 rounded-full border border-neon-red bg-void-glass px-3 py-1 text-xs font-bold">{hud.alarm}</div>
+      )}
+      {playing && hud?.seen && (
+        <div className="pointer-events-none absolute left-1/2 top-[4.25rem] -translate-x-1/2 rounded-full border border-neon-red bg-void-glass px-3 py-0.5 text-xs font-bold text-neon-red">👁 SEEN</div>
       )}
       <canvas
         ref={mmRef}
         width={124}
         height={124}
-        className={`pointer-events-none absolute left-3 top-14 h-[110px] w-[110px] rounded-xl border border-neon-violet/40 ${playing ? "" : "invisible"}`}
+        className={`pointer-events-none absolute left-3 top-11 h-[100px] w-[100px] rounded-xl border border-neon-violet/40 ${playing ? "" : "invisible"}`}
       />
       <div className={`pointer-events-none absolute inset-x-0 top-[24%] text-center text-lg font-bold drop-shadow transition-opacity ${toast && playing ? "opacity-100" : "opacity-0"}`}>{toast}</div>
 
       {playing && (
         <>
-          <div className="absolute right-3 top-14 flex flex-col gap-2">
-            <button className="h-10 w-10 rounded-full border border-neon-violet/40 bg-void-glass" onClick={() => { g?.togglePause(); setPaused(!!g?.paused); }} aria-label="Pause">⏸</button>
-            <button className="h-10 w-10 rounded-full border border-neon-violet/40 bg-void-glass" onClick={() => { if (g) { g.muted = !g.muted; setMuted(g.muted); } }} aria-label="Sound">{muted ? "🔇" : "🔊"}</button>
+          <div className="absolute right-3 top-11 flex gap-2">
+            <button className="h-9 w-9 rounded-full border border-neon-violet/40 bg-void-glass text-sm" onClick={() => { g?.togglePause(); setPaused(!!g?.paused); }} aria-label="Pause">⏸</button>
+            <button className="h-9 w-9 rounded-full border border-neon-violet/40 bg-void-glass text-sm" onClick={() => { if (g) { g.muted = !g.muted; setMuted(g.muted); } }} aria-label="Sound">{muted ? "🔇" : "🔊"}</button>
           </div>
 
           {/* joystick */}
