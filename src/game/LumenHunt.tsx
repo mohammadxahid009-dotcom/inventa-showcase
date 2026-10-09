@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { Game, type EndInfo, type Hud, type Role } from "./engine";
+import { Voice, type VoiceState } from "./voice";
 
 const DIFFS = [
   { name: "Normal", m: 1, h: 150 },
@@ -19,6 +20,10 @@ export default function LumenHunt() {
   const chRef = useRef<RealtimeChannel | null>(null);
   const myId = useRef(Math.random().toString(36).slice(2));
   const startedRef = useRef(false);
+  const voiceRef = useRef<Voice | null>(null);
+  const isHostRef = useRef(false);
+  const [vc, setVc] = useState<VoiceState | null>(null);
+  const stopVoice = () => { voiceRef.current?.stop(); voiceRef.current = null; setVc(null); };
 
   const [screen, setScreen] = useState<Screen>("menu");
   const [tab, setTab] = useState<"solo" | "mp">("solo");
@@ -65,6 +70,7 @@ export default function LumenHunt() {
       removeEventListener("keydown", kd); removeEventListener("keyup", ku);
       document.removeEventListener("visibilitychange", vis);
       g.destroy();
+      voiceRef.current?.stop();
       if (chRef.current) void supabase.removeChannel(chRef.current);
     };
   }, []);
@@ -92,6 +98,7 @@ export default function LumenHunt() {
 
   // ---------- multiplayer ----------
   const leaveRoom = (msg = "") => {
+    stopVoice();
     if (chRef.current) void supabase.removeChannel(chRef.current);
     chRef.current = null; startedRef.current = false;
     gameRef.current?.stop();
@@ -102,6 +109,10 @@ export default function LumenHunt() {
     startedRef.current = true;
     setEnd(null); setPaused(false);
     const ch = chRef.current!;
+    if (voiceRef.current?.ch !== ch) {
+      voiceRef.current?.stop();
+      if (typeof RTCPeerConnection !== "undefined") voiceRef.current = new Voice(ch, isHostRef.current, setVc);
+    }
     gameRef.current!.startMp(seed, myRole, {
       send: (ev, payload) => { void ch.send({ type: "broadcast", event: ev, payload }); },
     }, co);
@@ -115,6 +126,8 @@ export default function LumenHunt() {
   };
 
   const joinRoom = (code: string, host: boolean) => {
+    stopVoice();
+    isHostRef.current = host;
     if (chRef.current) void supabase.removeChannel(chRef.current);
     startedRef.current = false;
     setRoom(code); setIsHost(host);
@@ -144,6 +157,7 @@ export default function LumenHunt() {
     for (const ev of ["st", "coin", "scan", "spot", "decoy", "pow", "dmg", "mis", "bul", "shk"]) {
       ch.on("broadcast", { event: ev }, ({ payload }) => gameRef.current?.netIn(ev, payload));
     }
+    ch.on("broadcast", { event: "rtc" }, ({ payload }) => { void voiceRef.current?.onSignal(payload); });
     ch.on("broadcast", { event: "end" }, ({ payload }) => gameRef.current?.remoteEnd(payload.w, payload.text));
     ch.on("broadcast", { event: "rematch" }, ({ payload }) => { if (!host) beginMatch(payload.seed, payload.hr === "h" ? "s" : "h", !!payload.co); });
 
@@ -221,6 +235,20 @@ export default function LumenHunt() {
           {hud?.mp || hud?.hunt ? `You: ${hud.role === "h" ? "HIDER" : "HUNTER"}` : hud?.seekers}
         </div>
       </div>
+      {playing && hud?.mp && vc && (
+        <div className="absolute right-3 top-12 flex flex-col items-end gap-1 text-xs font-bold">
+          <button
+            onClick={() => void voiceRef.current?.setMic(!vc.micOn)}
+            className={`rounded-full border bg-void-glass px-3 py-1.5 transition-shadow ${vc.micOn ? "border-neon-blue text-neon-blue" : "border-ink/30 text-ink/70"} ${vc.meTalking ? "shadow-[0_0_14px_currentColor]" : ""}`}
+          >
+            {vc.micOn ? "🎙️ Mic on" : "🔇 Mic off"}
+          </button>
+          <div className={`rounded-full bg-void-glass px-2 py-1 ${vc.peerTalking ? "text-neon-yellow" : "text-ink/60"}`}>
+            {vc.connected ? (vc.peerTalking ? "🔊 Friend talking" : "🔈 Voice ready") : "… connecting voice"}
+          </div>
+          {vc.error && <div className="max-w-48 rounded-xl bg-void-glass px-2 py-1 text-neon-red">{vc.error}</div>}
+        </div>
+      )}
       {playing && hud?.mp && hud.role === "s" && (
         <div className="pointer-events-none absolute left-1/2 top-12 flex -translate-x-1/2 items-center gap-2 text-xs font-bold">
           ❤️
