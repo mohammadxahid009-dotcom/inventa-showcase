@@ -173,7 +173,7 @@ export default function LumenHunt() {
 
   // ---------- touch controls ----------
   const jsRef = useRef<HTMLDivElement>(null);
-  const [knob, setKnob] = useState({ x: 0, y: 0 });
+  const knobRef = useRef<HTMLDivElement>(null);
   const jPointer = useRef<number | null>(null);
   const jMove = (e: React.PointerEvent) => {
     if (jPointer.current !== e.pointerId) return;
@@ -181,7 +181,7 @@ export default function LumenHunt() {
     let dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
     const max = r.width / 2 - 20, l = Math.hypot(dx, dy);
     if (l > max) { dx = (dx / l) * max; dy = (dy / l) * max; }
-    setKnob({ x: dx, y: dy });
+    if (knobRef.current) knobRef.current.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
     const g = gameRef.current!;
     const deadzone = 4;
     const fullThreshold = 14;
@@ -195,7 +195,7 @@ export default function LumenHunt() {
       g.jy = (dy / cl) * strength;
     }
   };
-  const jEnd = () => { jPointer.current = null; setKnob({ x: 0, y: 0 }); const g = gameRef.current!; g.jx = g.jy = 0; };
+  const jEnd = () => { jPointer.current = null; if (knobRef.current) knobRef.current.style.transform = "translate(-50%, -50%)"; const g = gameRef.current!; g.jx = g.jy = 0; };
 
   const g = gameRef.current;
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -209,15 +209,15 @@ export default function LumenHunt() {
 
       {/* HUD */}
       <div className={`pointer-events-none absolute inset-x-0 top-2 flex items-start justify-between px-3 text-sm font-bold ${playing ? "" : "invisible"}`}>
-        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
+        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5">
           {hud?.mp
-            ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal}${hud.role === "h" ? ` · 🟡 ${hud.coins ?? 0}` : ""} · ⏱ ${fmt(hud.timeLeft ?? 0)} · ${room}`
+            ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal}${hud.role === "h" ? ` · 🟡 ${hud.coins ?? 0}` : ""} · ${room}`
             : hud?.hunt
               ? `🎯 ${hud.score}/2 caught · ⏱ ${fmt(hud.timeLeft ?? 0)} · Lv ${hud.level}`
               : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · 🟡 ${hud?.coins ?? 0} · Lv ${hud?.level ?? 1}`}
         </div>
         {hud?.seen && <div className="rounded-full border border-neon-red bg-void-glass px-3 py-1.5 text-neon-red">👁 SEEN</div>}
-        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5 backdrop-blur">
+        <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5">
           {hud?.mp || hud?.hunt ? `You: ${hud.role === "h" ? "HIDER" : "HUNTER"}` : hud?.seekers}
         </div>
       </div>
@@ -269,7 +269,8 @@ export default function LumenHunt() {
           >
             <div
               className="pointer-events-none absolute left-1/2 top-1/2 h-14 w-14 rounded-full bg-neon-blue shadow-[0_0_18px_var(--neon-blue)]"
-              style={{ transform: `translate(calc(-50% + ${knob.x}px), calc(-50% + ${knob.y}px))` }}
+              ref={knobRef}
+              style={{ transform: "translate(-50%, -50%)" }}
             />
           </div>
 
@@ -392,7 +393,7 @@ export default function LumenHunt() {
           <h1 className="text-4xl font-black tracking-tight">🔵 Lumen Hunt 🔴</h1>
 
           {screen === "end" && end ? (
-            <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-6 backdrop-blur-xl">
+            <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-6-xl">
               <h2 className="text-3xl font-extrabold">{end.win ? "🏆 YOU WIN!" : "💀 YOU LOSE"}</h2>
               <p className="text-ink-dim">{end.text}</p>
               {room ? (
@@ -418,7 +419,7 @@ export default function LumenHunt() {
             </div>
           ) : (
             <>
-              <div className="flex rounded-full border border-ink/15 bg-ink/5 p-1 backdrop-blur-xl">
+              <div className="flex rounded-full border border-ink/15 bg-ink/5 p-1-xl">
                 {(["solo", "mp"] as const).map((t) => (
                   <button key={t} onClick={() => setTab(t)} className={`rounded-full px-5 py-2 font-extrabold ${tab === t ? "bg-neon-blue" : "text-ink-dim"}`}>
                     {t === "solo" ? "🎮 Solo" : "👥 Multiplayer"}
@@ -428,7 +429,7 @@ export default function LumenHunt() {
               <p className="text-ink-dim">Find the real keys, reach the exit, avoid the seekers.</p>
 
               {tab === "solo" ? (
-                <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-5 backdrop-blur-xl">
+                <div className="flex w-full max-w-sm flex-col items-center gap-4 rounded-3xl border border-ink/15 bg-ink/5 p-5-xl">
                   <div className="flex items-center gap-2">
                     <span className="text-ink-dim">Play as:</span>
                     {(["h", "s"] as const).map((r) => (
@@ -455,7 +456,7 @@ export default function LumenHunt() {
                   </details>
                 </div>
               ) : (
-                <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-3xl border border-ink/15 bg-ink/5 p-5 backdrop-blur-xl">
+                <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-3xl border border-ink/15 bg-ink/5 p-5-xl">
                   {!room ? (
                     <>
                       <RoleToggle role={role} setRole={setRole} companion={companion} setCompanion={setCompanion} />

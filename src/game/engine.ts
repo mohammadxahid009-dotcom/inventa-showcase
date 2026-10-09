@@ -231,8 +231,9 @@ export class Game {
 
   destroy() { cancelAnimationFrame(this.raf); }
 
+  lowFx = false; ftAcc = 0; ftN = 0; miniT = 0; miniBg: HTMLCanvasElement | null = null; miniG: unknown = null;
   resize() {
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = this.lowFx ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
     this.W = window.innerWidth;
     this.H = window.innerHeight;
     this.cv.width = Math.round(this.W * this.dpr);
@@ -463,7 +464,7 @@ export class Game {
       const cs = ctr(N - 2, 1);
       this.seekers.push({ ...cs, r: 12, vx: 0, vy: 0, path: [], think: 0, scanCd: 5, frozen: 0, target: null, hue: "#ff8a3b", trail: [] });
     }
-    this.onToast(role === "h" ? (companion ? "🔵 You are the HIDER — watch out, the seeker brought an AI partner!" : "🔵 You are the HIDER — collect 5 keys and escape, or survive 3:00") : (companion ? "🔴 You are the SEEKER — your AI partner hunts with you!" : "🔴 You are the SEEKER — catch the hider!"));
+    this.onToast(role === "h" ? (companion ? "🔵 You are the HIDER — watch out, the seeker brought an AI partner!" : "🔵 You are the HIDER — collect 5 keys and escape — no time limit") : (companion ? "🔴 You are the SEEKER — your AI partner hunts with you!" : "🔴 You are the SEEKER — catch the hider!"));
     this.begin();
   }
 
@@ -1289,7 +1290,6 @@ export class Game {
     this.foeTrail = this.decayTrail(this.foeTrail, dt);
     if (foe.moving) this.pushTrail(this.foeTrail, foe.x, foe.y, 0.5, 40);
     this.updatePowers(dt);
-    this.timeLeft -= dt;
     if (this.role === "s") {
       // footprints: always faint when hider dashes, full while tracker is active
       const ox = this.prints.at(-1);
@@ -1322,7 +1322,6 @@ export class Game {
         s.trail = this.decayTrail(s.trail, dt);
         if (Math.hypot(s.x - ox, s.y - oy) > 0.2) this.pushTrail(s.trail, s.x, s.y, 0.5, 40);
       }
-      if (this.timeLeft <= 0) return this.finish(true, "You survived 3 minutes!");
     } else {
       // seeker scan can reveal the hider on seeker's side too
       for (const s of this.scans) if (s.owner === "me" && !s.hit && !this.foeCloak && Math.abs(Math.hypot(foe.x - s.x, foe.y - s.y) - scanR(s)) < 14) { s.hit = true; foe.rev = 5; }
@@ -1333,10 +1332,12 @@ export class Game {
 
   foeVisible() {
     const f = this.foe;
-    if (!f || !f.seen) return false;
+    if (!f) return false;
+    if (this.role === "h") return true;
+    if (!f.seen) return false;
     const v = this.aiming ? this.aim : this.me;
     const d = Math.hypot(f.x - v.x, f.y - v.y);
-    if (this.role === "h") return d < 340;
+    if (this.role === "h") return true; // hunter always visible to the hider
     return f.rev > 0 && !this.foeCloak;
   }
 
@@ -1373,20 +1374,25 @@ export class Game {
     if (window.innerWidth !== this.W || window.innerHeight !== this.H) this.resize();
     const dt = Math.min(0.1, Math.max(0, (now - this.last) / 1000));
     this.last = now;
+    // adaptive quality: if frames are slow, drop resolution + glow effects
+    if (!this.lowFx && this.running && dt > 0) {
+      this.ftAcc += dt; this.ftN++;
+      if (this.ftN >= 90) { if (this.ftAcc / this.ftN > 1 / 50) { this.lowFx = true; this.resize(); } this.ftAcc = 0; this.ftN = 0; }
+    }
     if (this.zap) { this.zap.t -= dt; if (this.zap.t <= 0) this.zap = null; }
     if (this.dark) { this.dark.t -= dt; if (this.dark.t <= 0) this.dark = null; }
     if (this.hitStop > 0) { this.hitStop -= dt; this.shake = Math.max(0, this.shake - dt * 0.5); }
     else if (this.running && !this.paused) this.update(dt);
     if (this.g.length && this.me) this.draw(now);
     this.hudT -= dt;
-    if (this.hudT <= 0 && this.me) { this.hudT = 0.1; this.emitHud(); }
+    if (this.hudT <= 0 && this.me) { this.hudT = this.lowFx ? 0.25 : 0.15; this.emitHud(); }
   }
 
   emitHud() {
     this.onHud({
       score: this.score, coins: this.coinsLeft, goal: this.goal, level: this.level,
       scanCd: this.scanCd, dashCd: this.dashCd, decoyCd: this.decoyCd,
-      seen: this.me.rev > 0, timeLeft: this.mp || this.hunt ? Math.max(0, this.timeLeft) : null,
+      seen: this.me.rev > 0, timeLeft: this.hunt ? Math.max(0, this.timeLeft) : null,
       alarm: this.alarmA > 0 ? "🚨 ALARM — you are tracked!" : this.alarmW > 0 ? `🚨 Alarm in ${Math.ceil(this.alarmW)}s` : "",
       role: this.role, mp: this.mp, hunt: this.hunt,
       weapon: this.weapon, aiming: this.aiming, lock: this.lock, ammo: this.ammo, hp: this.myHp,
@@ -1445,7 +1451,7 @@ export class Game {
     grad.addColorStop(0, "#7b5cff"); grad.addColorStop(0.5, "#b04bff"); grad.addColorStop(1, "#ff4bd8");
     c.lineCap = "round";
     c.strokeStyle = grad;
-    c.globalAlpha = 0.18; c.lineWidth = 9; c.stroke();
+    if (!this.lowFx) { c.globalAlpha = 0.18; c.lineWidth = 9; c.stroke(); }
     c.globalAlpha = 1; c.lineWidth = 2.5; c.stroke();
 
     // The local player's short-lived path, drawn underneath the moving circles.
@@ -1753,7 +1759,8 @@ export class Game {
       c.restore();
     }
     if (this.frozenMe > 0) { c.fillStyle = `rgba(140,230,255,${0.18 + 0.05 * Math.sin(now / 90)})`; c.fillRect(0, 0, W, H); }
-    this.drawMini();
+    this.miniT -= 1; if (this.miniT <= 0) { this.miniT = this.lowFx ? 4 : 2; this.drawMini(); }
+    if (this.lowFx) c.shadowBlur = 0;
   }
 
   drawMini() {
@@ -1761,9 +1768,15 @@ export class Game {
     if (!c) return;
     const S = m.width / (N * T), k = m.width / N;
     c.setTransform(1, 0, 0, 1, 0, 0);
-    c.fillStyle = "#07061a"; c.fillRect(0, 0, m.width, m.height);
-    c.fillStyle = "#3a2c7a";
-    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (this.g[y]?.[x]) c.fillRect(x * k, y * k, k + 0.3, k + 0.3);
+    if (!this.miniBg || this.miniG !== this.g) {
+      const bg = this.miniBg ?? document.createElement("canvas"); bg.width = m.width; bg.height = m.height;
+      const bc = bg.getContext("2d")!;
+      bc.fillStyle = "#07061a"; bc.fillRect(0, 0, m.width, m.height);
+      bc.fillStyle = "#3a2c7a";
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) if (this.g[y]?.[x]) bc.fillRect(x * k, y * k, k + 0.3, k + 0.3);
+      this.miniBg = bg; this.miniG = this.g;
+    }
+    c.drawImage(this.miniBg, 0, 0);
     const dot = (x: number, y: number, col: string, r = 2.6) => { c.fillStyle = col; c.beginPath(); c.arc(x * S, y * S, r, 0, 7); c.fill(); };
     for (const p of this.portals) { dot(p.a.x, p.a.y, p.c, 2); dot(p.b.x, p.b.y, p.c, 2); }
     for (const p of this.pows) dot(p.x, p.y, POW[p.k].c, 2);
