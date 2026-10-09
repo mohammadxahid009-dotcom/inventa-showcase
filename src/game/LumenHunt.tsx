@@ -236,7 +236,7 @@ export default function LumenHunt() {
         </div>
       </div>
       {playing && hud?.mp && vc && (
-        <div className="absolute right-3 top-12 flex flex-col items-end gap-1 text-xs font-bold">
+        <div className="absolute right-16 top-14 flex flex-col items-end gap-1 text-xs font-bold">
           <button
             onClick={() => void voiceRef.current?.setMic(!vc.micOn)}
             className={`rounded-full border bg-void-glass px-3 py-1.5 transition-shadow ${vc.micOn ? "border-neon-blue text-neon-blue" : "border-ink/30 text-ink/70"} ${vc.meTalking ? "shadow-[0_0_14px_currentColor]" : ""}`}
