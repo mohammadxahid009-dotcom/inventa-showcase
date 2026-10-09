@@ -897,6 +897,12 @@ export class Game {
     const s = this.seekers[Number(id.slice(1))];
     if (!s) return;
     s.hp = (s.hp ?? 1) - amt;
+    if (ko(s.hp) && !this.mp && this.role === "h") {
+      this.seekers = this.seekers.filter((x) => x !== s); this.lockId = null;
+      this.burst(s.x, s.y, "#ff7a2f", 50); this.burst(s.x, s.y, "#ffe14a", 25); this.shake = Math.max(this.shake, 0.4);
+      this.onToast(this.seekers.length ? `💀 Hunter destroyed — ${this.seekers.length} left!` : "💀 All hunters destroyed!");
+      return;
+    }
     if (ko(s.hp)) { s.hp = 1; s.frozen = 4; s.path = []; this.burst(s.x, s.y, "#ff7a2f", 40); this.onToast(this.role === "h" ? "💥 Hunter knocked out — stunned 4s!" : "💥 Your AI partner was knocked out!"); }
   }
   updateWeapons(dt: number) {
