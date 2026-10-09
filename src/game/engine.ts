@@ -163,6 +163,7 @@ export class Game {
   coinsSet = false; coinsLeft = 0;
   gen: { x: number; y: number } | null = null;
   genCd = 0; genHp = 1; genHit = 0; shockCharge = 0; shockReady = false; zapCache: { k: number; bolts: { pts: [number, number][]; w: number; a: number }[] } | null = null;
+  foeCharging = false; foeChargeTimer = 0;
   hiderHp = 1; foeHiderHp = 1;
   hitStop = 0;
   zap: { fx: number; fy: number; tx: number; ty: number; t: number } | null = null;
@@ -475,7 +476,7 @@ export class Game {
 
   resetCommon(start: { x: number; y: number }) {
     this.me = { ...start, r: 11, vx: 0, vy: 0, rev: 0, cloak: 0, spd: 0, moving: false };
-    this.foe = null; this.exit = null; this.coinsSet = false; this.gen = null; this.genHp = 1; this.genHit = 0; this.zapCache = null; this.genCd = 0; this.shockCharge = 0; this.shockReady = false; this.hiderHp = 1; this.foeHiderHp = 1; this.hitStop = 0; this.zap = null; this.dark = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
+    this.foe = null; this.exit = null; this.coinsSet = false; this.gen = null; this.genHp = 1; this.genHit = 0; this.zapCache = null; this.genCd = 0; this.shockCharge = 0; this.shockReady = false; this.foeCharging = false; this.foeChargeTimer = 0; this.hiderHp = 1; this.foeHiderHp = 1; this.hitStop = 0; this.zap = null; this.dark = null; this.seekers = []; this.cubes = []; this.scans = []; this.pows = []; this.portals = []; this.prints = []; this.hiders = []; this.frozenMe = 0; this.trackT = 0; this.heart = 0; this.parts = []; this.trail = []; this.foeTrail = [];
     this.decoy = null; this.foeDecoy = null; this.score = 0;
     this.weapon = null; this.aiming = false; this.lock = 0; this.lockId = null; this.ammo = 0; this.fireHeld = false; this.fireCd = 0;
     this.missiles = []; this.bullets = []; this.myHp = 1; this.foeHp = 1;
@@ -781,9 +782,12 @@ export class Game {
       c.fillStyle = col; c.fillRect(x - 17, y - 33, 34 * hp, 4); }
     if (!live) { c.strokeStyle = "#ff3b4e"; c.lineWidth = 2.5; c.beginPath(); c.arc(x, y - 9, 14, -Math.PI / 2, -Math.PI / 2 + (1 - this.genCd / 20) * Math.PI * 2); c.stroke(); }
     // charging beam to the hunter
-    if (live && this.role === "s" && !this.shockReady && Math.hypot(x - this.me.x, y - this.me.y) < 90) {
+    let tgt: { x: number; y: number } | null = null;
+    if (live && this.role === "s" && !this.shockReady && Math.hypot(x - this.me.x, y - this.me.y) < 90) tgt = this.me;
+    else if (this.role === "h" && this.foe && this.foeChargeTimer > 0 && Math.hypot(x - this.foe.x, y - this.foe.y) < 110) tgt = this.foe;
+    if (tgt) {
       c.lineCap = "round"; c.globalCompositeOperation = "lighter";
-      this.strokeBolt(this.boltPts(x, y - 9, this.me.x, this.me.y, 18), 0.9, 0.7 + 0.3 * Math.random());
+      this.strokeBolt(this.boltPts(x, y - 9, tgt.x, tgt.y, 18), 0.9, 0.7 + 0.3 * Math.random());
     }
     c.restore();
   }
@@ -948,6 +952,7 @@ export class Game {
     if (ev === "st") {
       this.foe.tx = p['x'] as number; this.foe.ty = p['y'] as number;
       this.foe.moving = !!p['m']; this.foe.dash = !!p['d']; this.foe.seen = true; this.foeCloak = !!p['ck'];
+      if (this.role === "h") { this.foeCharging = p['cg'] === 1; if (this.foeCharging) this.foeChargeTimer = 0.35; }
       if (this.role === "s") this.score = (p['sc'] as number) ?? this.score;
       if (this.role === "s") {
         const dr = Array.isArray(p['dr']) ? (p['dr'] as unknown as number[]) : [];
@@ -1004,6 +1009,10 @@ export class Game {
     this.portalCd = Math.max(0, this.portalCd - dt);
     this.exitCd = Math.max(0, this.exitCd - dt);
     this.dashT = Math.max(0, this.dashT - dt);
+    if (this.foeChargeTimer > 0) {
+      this.foeChargeTimer = Math.max(0, this.foeChargeTimer - dt);
+      if (this.role === "h" && this.gen && Math.random() < dt * 7) { const dd = Math.hypot(this.gen.x - me.x, this.gen.y - me.y); if (dd < 450) this.snd(1200 + Math.random() * 800, 0.04, "square", 0.012 * (1 - dd / 450), 900); }
+    }
     me.rev = Math.max(0, me.rev - dt);
     me.cloak = Math.max(0, me.cloak - dt);
     me.spd = Math.max(0, me.spd - dt);
@@ -1329,7 +1338,7 @@ export class Game {
     if (this.sendT <= 0) {
       this.sendT = 1 / 15;
       const cp = this.role === "s" ? this.seekers[0] : undefined;
-      this.net?.send("st", { x: Math.round(me.x), y: Math.round(me.y), m: me.moving, d: this.dashT > 0, ck: me.cloak > 0, sc: this.score, ...(this.role === "h" ? { dr: this.drones.flatMap((d) => [Math.round(d.x), Math.round(d.y), Math.round(d.alt * 100)]), lk: Math.round(this.droneLock * 100) } : {}), ...(cp ? { cx: Math.round(cp.x), cy: Math.round(cp.y) } : {}) });
+      this.net?.send("st", { x: Math.round(me.x), y: Math.round(me.y), m: me.moving, d: this.dashT > 0, ck: me.cloak > 0, sc: this.score, cg: this.role === "s" && !!this.gen && this.genCd <= 0 && !this.shockReady && Math.hypot(this.gen.x - me.x, this.gen.y - me.y) < 90 ? 1 : 0, ...(this.role === "h" ? { dr: this.drones.flatMap((d) => [Math.round(d.x), Math.round(d.y), Math.round(d.alt * 100)]), lk: Math.round(this.droneLock * 100) } : {}), ...(cp ? { cx: Math.round(cp.x), cy: Math.round(cp.y) } : {}) });
     }
     if (this.role === "h") {
       for (const s of this.seekers) {
