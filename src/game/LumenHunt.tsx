@@ -141,7 +141,7 @@ export default function LumenHunt() {
       if (host) return;
       beginMatch(payload.seed, payload.hr === "h" ? "s" : "h", !!payload.co);
     });
-    for (const ev of ["st", "scan", "spot", "decoy", "pow", "dmg", "mis", "bul", "shk"]) {
+    for (const ev of ["st", "coin", "scan", "spot", "decoy", "pow", "dmg", "mis", "bul", "shk"]) {
       ch.on("broadcast", { event: ev }, ({ payload }) => gameRef.current?.netIn(ev, payload));
     }
     ch.on("broadcast", { event: "end" }, ({ payload }) => gameRef.current?.remoteEnd(payload.w, payload.text));
@@ -211,7 +211,7 @@ export default function LumenHunt() {
       <div className={`pointer-events-none absolute inset-x-0 top-2 flex items-start justify-between px-3 text-sm font-bold ${playing ? "" : "invisible"}`}>
         <div className="rounded-full border border-neon-violet/40 bg-void-glass px-3 py-1.5">
           {hud?.mp
-            ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal}${hud.role === "h" ? ` · 🟡 ${hud.coins ?? 0}` : ""} · ${room}`
+            ? `${hud.role === "h" ? "🔵" : "🔴"} hider ${hud.score}/${hud.goal} · 🟡 ${hud.coins ?? 0} · ${room}`
             : hud?.hunt
               ? `🎯 ${hud.score}/2 caught · ⏱ ${fmt(hud.timeLeft ?? 0)} · Lv ${hud.level}`
               : `🔵 ${hud?.score ?? 0}/${hud?.goal ?? 5} · 🟡 ${hud?.coins ?? 0} · Lv ${hud?.level ?? 1}`}

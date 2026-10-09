@@ -189,7 +189,7 @@ export class Game {
   dashCd = 0;
   dashT = 0;
   decoyCd = 0;
-  portalCd = 0;
+  portalCd = 0; exitCd = 0;
   powT = 0;
   powBurst = 2;
   alarmW = 0;
@@ -459,6 +459,11 @@ export class Game {
     this.exit = this.freeTile(R, hStart, 400);
     this.gen = this.freeTile(R, sStart, 360);
     if (role === "h") this.spawnCubes();
+    else {
+      this.coins = new Uint8Array(N * N);
+      for (let y = 1; y < N - 1; y++) for (let x = 1; x < N - 1; x++) if (!this.g[y]?.[x]) this.coins[y * N + x] = 1;
+      this.coinsLeft = this.coins.reduce((a, v) => a + v, 0);
+    }
     this.companion = companion;
     if (companion) {
       const cs = ctr(N - 2, 1);
@@ -952,6 +957,9 @@ export class Game {
       }
       const cp = this.seekers[0];
       if (this.role === "h" && cp && typeof p['cx'] === "number") cp.target = { x: p['cx'] as number, y: p['cy'] as number };
+    } else if (ev === "coin") {
+      const i = p['i'] as number;
+      if (this.role === "s" && this.coins[i]) { this.coins[i] = 0; this.coinsLeft = Math.max(0, this.coinsLeft - 1); }
     } else if (ev === "scan") {
       this.scans.push({ x: p['x'] as number, y: p['y'] as number, t: 0, owner: "foe", hit: false, ...(p['sh'] ? { shock: true, maxR: 380 } : {}) });
       if (p['sh']) { this.onToast("⚡ The hunter released a SHOCK wave!"); this.vib([40]); }
@@ -994,6 +1002,7 @@ export class Game {
     this.dashCd = Math.max(0, this.dashCd - dt);
     this.decoyCd = Math.max(0, this.decoyCd - dt);
     this.portalCd = Math.max(0, this.portalCd - dt);
+    this.exitCd = Math.max(0, this.exitCd - dt);
     this.dashT = Math.max(0, this.dashT - dt);
     me.rev = Math.max(0, me.rev - dt);
     me.cloak = Math.max(0, me.cloak - dt);
@@ -1036,11 +1045,19 @@ export class Game {
     }
 
     // portals
-    if (this.portalCd <= 0) for (const p of this.portals) {
-      for (const [a, b] of [[p.a, p.b], [p.b, p.a]] as const) {
-        if (Math.hypot(a.x - me.x, a.y - me.y) < 16) {
-          me.x = b.x; me.y = b.y; this.trail = []; this.portalCd = 1.5;
-          this.snd(900, 0.35, "sine", 0.05, 200); this.burst(b.x, b.y, p.c);
+    if (this.portalCd <= 0 && this.dashT <= 0) {
+      const segD = (px: number, py: number) => {
+        const sx = me.x - oldX, sy = me.y - oldY, l2 = sx * sx + sy * sy;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((px - oldX) * sx + (py - oldY) * sy) / l2)) : 1;
+        return Math.hypot(oldX + sx * t - px, oldY + sy * t - py);
+      };
+      portalLoop: for (const p of this.portals) {
+        for (const [a, b] of [[p.a, p.b], [p.b, p.a]] as const) {
+          if (segD(a.x, a.y) < 22) {
+            me.x = b.x; me.y = b.y; this.trail = []; this.portalCd = 1.5;
+            this.snd(900, 0.35, "sine", 0.05, 200); this.burst(b.x, b.y, p.c);
+            break portalLoop;
+          }
         }
       }
     }
@@ -1083,14 +1100,14 @@ export class Game {
     // keys + exit (hider only)
     if (this.role === "h" && this.exit && Math.hypot(this.exit.x - me.x, this.exit.y - me.y) < 22) {
       if (this.score >= this.goal && this.coinsLeft <= 0) return this.finish(true, this.mp ? "You escaped with all 5 keys!" : `Escaped! Level ${this.level} cleared!`);
-      if (this.portalCd <= 0 && this.score >= this.goal) { this.onToast(`🔒 EXIT DENIED — ${this.coinsLeft} coin${this.coinsLeft === 1 ? "" : "s"} still in the maze!`); this.portalCd = 1.5; }
-      if (this.portalCd <= 0) { this.onToast(`🔒 Exit locked — ${this.goal - this.score} more key${this.goal - this.score === 1 ? "" : "s"} needed`); this.portalCd = 1.5; }
+      if (this.exitCd <= 0 && this.score >= this.goal) { this.onToast(`🔒 EXIT DENIED — ${this.coinsLeft} coin${this.coinsLeft === 1 ? "" : "s"} still in the maze!`); this.exitCd = 1.5; }
+      if (this.exitCd <= 0) { this.onToast(`🔒 Exit locked — ${this.goal - this.score} more key${this.goal - this.score === 1 ? "" : "s"} needed`); this.exitCd = 1.5; }
     }
     if (this.role === "h") {
       const ci = Math.floor(me.y / T) * N + Math.floor(me.x / T);
       if (this.coins[ci]) {
         const cx = (ci % N) * T + T / 2, cy = Math.floor(ci / N) * T + T / 2;
-        if (Math.hypot(cx - me.x, cy - me.y) < 14) { this.coins[ci] = 0; this.coinsLeft--; if (this.coinsLeft === 0) this.onToast(this.score >= this.goal ? "🔓 Maze cleared — run to the EXIT!" : "🟡 All coins collected! Now find the keys"); this.snd(1200 + Math.random() * 200, 0.05, "square", 0.02, 1700); this.burst(cx, cy, "#ffd6a0", 3); }
+        if (Math.hypot(cx - me.x, cy - me.y) < 14) { this.coins[ci] = 0; this.coinsLeft--; if (this.mp) this.net?.send("coin", { i: ci }); if (this.coinsLeft === 0) this.onToast(this.score >= this.goal ? "🔓 Maze cleared — run to the EXIT!" : "🟡 All coins collected! Now find the keys"); this.snd(1200 + Math.random() * 200, 0.05, "square", 0.02, 1700); this.burst(cx, cy, "#ffd6a0", 3); }
       }
       for (const c of this.cubes) c.vis = Math.max(0, c.vis - dt);
       for (const c of [...this.cubes]) {
@@ -1571,12 +1588,14 @@ export class Game {
     }
 
     // coins (hider only), visible tiles
-    if (this.role === "h") {
-      c.fillStyle = "#ffc9a0"; c.shadowColor = "#ffb070"; c.shadowBlur = 6;
+    const seeCoins = this.role === "h" || this.mp;
+    if (seeCoins) {
+      if (this.role !== "h") c.globalAlpha = 0.4;
+      c.fillStyle = "#ffc9a0"; c.shadowColor = "#ffb070"; c.shadowBlur = this.lowFx ? 0 : 6;
       const vx0 = Math.max(0, Math.floor((cam.x - this.W / 2 / this.z) / T) - 1), vx1 = Math.min(N - 1, Math.ceil((cam.x + this.W / 2 / this.z) / T) + 1);
       const vy0 = Math.max(0, Math.floor((cam.y - this.H / 2 / this.z) / T) - 1), vy1 = Math.min(N - 1, Math.ceil((cam.y + this.H / 2 / this.z) / T) + 1);
       for (let y = vy0; y <= vy1; y++) for (let x = vx0; x <= vx1; x++) if (this.coins[y * N + x]) { c.beginPath(); c.arc(x * T + T / 2, y * T + T / 2, 3, 0, 7); c.fill(); }
-      c.shadowBlur = 0;
+      c.shadowBlur = 0; c.globalAlpha = 1;
     }
     if (this.gen) this.drawGen(this.gen.x, this.gen.y, now);
     // power-ups
