@@ -239,7 +239,7 @@ export default function LumenHunt() {
         <div className="absolute right-3 top-[5.25rem] flex flex-col items-end gap-1 text-[11px] font-bold">
           <button
             onClick={() => void voiceRef.current?.setMic(!vc.micOn)}
-            className={`rounded-full border bg-void-glass px-2.5 py-1 transition-shadow ${vc.micOn ? "border-neon-blue text-neon-blue" : "border-ink/30 text-ink/70"} ${vc.meTalking ? "shadow-[0_0_14px_currentColor]" : ""}`}
+            className={`rounded-full border bg-void-glass px-2.5 py-1 transition-shadow ${vc.peerTalking ? "border-neon-yellow text-neon-yellow shadow-[0_0_14px_currentColor]" : vc.micOn ? "border-neon-blue text-neon-blue" : "border-ink/30 text-ink/70"}`}
           >
             {vc.micOn ? "🎙️ Mic on" : "🔇 Mic off"}
           </button>
